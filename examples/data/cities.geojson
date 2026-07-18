@@ -1,0 +1,25 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {"type": "Feature", "id": 1, "properties": {"name": "北京", "name_en": "Beijing", "population": 21893095},
+     "geometry": {"type": "Point", "coordinates": [116.4074, 39.9042]}},
+    {"type": "Feature", "id": 2, "properties": {"name": "上海", "name_en": "Shanghai", "population": 24870895},
+     "geometry": {"type": "Point", "coordinates": [121.4737, 31.2304]}},
+    {"type": "Feature", "id": 3, "properties": {"name": "广州", "name_en": "Guangzhou", "population": 18676605},
+     "geometry": {"type": "Point", "coordinates": [113.2644, 23.1291]}},
+    {"type": "Feature", "id": 4, "properties": {"name": "深圳", "name_en": "Shenzhen", "population": 17560061},
+     "geometry": {"type": "Point", "coordinates": [114.0579, 22.5431]}},
+    {"type": "Feature", "id": 5, "properties": {"name": "成都", "name_en": "Chengdu", "population": 20937757},
+     "geometry": {"type": "Point", "coordinates": [104.0665, 30.5723]}},
+    {"type": "Feature", "id": 6, "properties": {"name": "武汉", "name_en": "Wuhan", "population": 12326518},
+     "geometry": {"type": "Point", "coordinates": [114.3055, 30.5928]}},
+    {"type": "Feature", "id": 7, "properties": {"name": "西安", "name_en": "Xi'an", "population": 12952907},
+     "geometry": {"type": "Point", "coordinates": [108.9398, 34.3416]}},
+    {"type": "Feature", "id": 8, "properties": {"name": "杭州", "name_en": "Hangzhou", "population": 11936010},
+     "geometry": {"type": "Point", "coordinates": [120.1551, 30.2741]}},
+    {"type": "Feature", "id": 9, "properties": {"name": "重庆", "name_en": "Chongqing", "population": 32054159},
+     "geometry": {"type": "Point", "coordinates": [106.5516, 29.5630]}},
+    {"type": "Feature", "id": 10, "properties": {"name": "南京", "name_en": "Nanjing", "population": 9314685},
+     "geometry": {"type": "Point", "coordinates": [118.7969, 32.0603]}}
+  ]
+}
