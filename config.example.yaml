@@ -1,0 +1,45 @@
+# GeoVerse Map Server 示例配置
+# 用法: geoverse -config config.yaml
+
+server:
+  host: 0.0.0.0
+  port: 8080
+  cors: true
+  timeout: 30s
+  # base_url: https://maps.example.com   # 反向代理场景下的外部地址
+
+cache:
+  enabled: true
+  max_entries: 10000   # 进程内 LRU 缓存的切片条数上限
+  ttl: 5m
+
+sources:
+  # ── 数据库：PostGIS 动态矢量切片（需要 PostGIS >= 3.0）──────────
+  # - name: roads
+  #   type: postgis
+  #   dsn: postgres://user:password@localhost:5432/gis
+  #   table: public.roads
+  #   geometry_column: geom      # 默认 geom
+  #   id_column: gid             # 缺省时自动探测主键
+  #   srid: 4326                 # 缺省时从 geometry_columns 探测
+  #   fields: [name, class]      # 缺省时导出全部非几何列
+  #   min_zoom: 0
+  #   max_zoom: 22
+
+  # ── 静态文件：预切好的 MBTiles（矢量 pbf 或 png/jpg/webp 栅格）──
+  # - name: basemap
+  #   type: mbtiles
+  #   path: ./data/basemap.mbtiles
+
+  # ── 静态文件：GeoJSON（启动时载入内存，动态切片 + 要素服务）────
+  - name: cities
+    type: geojson
+    path: ./examples/data/cities.geojson
+    title: 中国主要城市
+    max_zoom: 14
+
+  # ── 静态文件：OGC GeoPackage ────────────────────────────────
+  # - name: parcels
+  #   type: geopackage
+  #   path: ./data/parcels.gpkg
+  #   layer: parcels             # gpkg 内只有一个要素表时可省略
