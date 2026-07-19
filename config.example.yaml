@@ -67,8 +67,31 @@ sources:
     title: 世界主要城市（Natural Earth 1:110m）
     max_zoom: 10
 
+  # 步行路网示例：室外街区网格 + 两层室内走廊（入口坡道/电梯连接体），
+  # 供下方 networks 构建可路由图
+  - name: campus_paths
+    type: geojson
+    path: ./examples/data/campus_paths.geojson
+    title: 校园步行路网示例
+    max_zoom: 18
+
   # ── 静态文件：OGC GeoPackage ────────────────────────────────
   # - name: parcels
   #   type: geopackage
   #   path: ./data/parcels.gpkg
   #   layer: parcels             # gpkg 内只有一个要素表时可省略
+
+# 可路由网络：由某个要素源的 LineString 构建图，供路由类算法使用。
+# 多层室内：要素带 level 属性即在该层；带 level_from/level_to 的要素是
+# 跨层连接体（楼梯/电梯/入口），可用 duration_s 指定固定通行耗时。
+networks:
+  - name: campus
+    source: campus_paths
+    default_speed_kmh: 5       # 步行速度
+    # speed_field: speed_kmh   # 每条线的速度属性（可选）
+    # oneway_field: oneway     # 单行线属性（可选）
+
+# 空间算法端点（默认开启）：GET /algorithms 列出全部能力，
+# POST /algorithms/{name} 执行；开启 MCP 后同时暴露为 algo_* 工具
+algorithms:
+  enabled: true

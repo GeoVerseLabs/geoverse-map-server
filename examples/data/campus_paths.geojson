@@ -1,0 +1,251 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "id": 1,
+   "properties": {
+    "name": "东西路1",
+    "highway": "footway"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3,
+      39.99
+     ],
+     [
+      116.302,
+      39.99
+     ],
+     [
+      116.304,
+      39.99
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 2,
+   "properties": {
+    "name": "东西路2",
+    "highway": "footway"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3,
+      39.992
+     ],
+     [
+      116.302,
+      39.992
+     ],
+     [
+      116.304,
+      39.992
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 3,
+   "properties": {
+    "name": "东西路3",
+    "highway": "footway"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3,
+      39.994
+     ],
+     [
+      116.302,
+      39.994
+     ],
+     [
+      116.304,
+      39.994
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 4,
+   "properties": {
+    "name": "南北路1",
+    "highway": "footway"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3,
+      39.99
+     ],
+     [
+      116.3,
+      39.992
+     ],
+     [
+      116.3,
+      39.994
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 5,
+   "properties": {
+    "name": "南北路2",
+    "highway": "footway"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.302,
+      39.99
+     ],
+     [
+      116.302,
+      39.992
+     ],
+     [
+      116.302,
+      39.994
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 6,
+   "properties": {
+    "name": "南北路3",
+    "highway": "footway"
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.304,
+      39.99
+     ],
+     [
+      116.304,
+      39.992
+     ],
+     [
+      116.304,
+      39.994
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 7,
+   "properties": {
+    "name": "入口坡道",
+    "level_from": 0,
+    "level_to": 1,
+    "duration_s": 20
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.304,
+      39.99
+     ],
+     [
+      116.3055,
+      39.99
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 8,
+   "properties": {
+    "name": "一层走廊",
+    "level": 1
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3055,
+      39.99
+     ],
+     [
+      116.3055,
+      39.9912
+     ],
+     [
+      116.3055,
+      39.9925
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 9,
+   "properties": {
+    "name": "二层走廊",
+    "level": 2
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3055,
+      39.99
+     ],
+     [
+      116.3055,
+      39.9912
+     ],
+     [
+      116.3055,
+      39.9925
+     ]
+    ]
+   }
+  },
+  {
+   "type": "Feature",
+   "id": 10,
+   "properties": {
+    "name": "电梯",
+    "level_from": 1,
+    "level_to": 2,
+    "duration_s": 25
+   },
+   "geometry": {
+    "type": "LineString",
+    "coordinates": [
+     [
+      116.3055,
+      39.9912
+     ],
+     [
+      116.3055,
+      39.9912
+     ]
+    ]
+   }
+  }
+ ]
+}

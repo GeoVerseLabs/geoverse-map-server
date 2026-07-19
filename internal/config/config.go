@@ -14,11 +14,33 @@ import (
 
 // Config is the root of the YAML configuration.
 type Config struct {
-	Server  Server   `yaml:"server"`
-	Cache   Cache    `yaml:"cache"`
-	Auth    Auth     `yaml:"auth"`
-	MCP     MCP      `yaml:"mcp"`
-	Sources []Source `yaml:"sources"`
+	Server     Server     `yaml:"server"`
+	Cache      Cache      `yaml:"cache"`
+	Auth       Auth       `yaml:"auth"`
+	MCP        MCP        `yaml:"mcp"`
+	Algorithms Algorithms `yaml:"algorithms"`
+	Sources    []Source   `yaml:"sources"`
+	Networks   []Network  `yaml:"networks"`
+}
+
+// Algorithms toggles the algorithm endpoints (enabled by default).
+type Algorithms struct {
+	Enabled *bool `yaml:"enabled"`
+}
+
+// On reports whether algorithm endpoints should be served.
+func (a Algorithms) On() bool { return a.Enabled == nil || *a.Enabled }
+
+// Network declares a routable graph built from a feature source's
+// LineString features, used by the routing algorithms.
+type Network struct {
+	Name            string  `yaml:"name"`
+	Source          string  `yaml:"source"`
+	DefaultSpeedKMH float64 `yaml:"default_speed_kmh"`
+	SpeedField      string  `yaml:"speed_field"`
+	OnewayField     string  `yaml:"oneway_field"`
+	LevelField      string  `yaml:"level_field"`
+	NameField       string  `yaml:"name_field"`
 }
 
 // Server holds HTTP server settings.
@@ -188,6 +210,19 @@ func (c *Config) Validate() error {
 		}
 		if s.MinZoom != nil && s.MaxZoom != nil && *s.MinZoom > *s.MaxZoom {
 			return fmt.Errorf("source %q: min_zoom > max_zoom", s.Name)
+		}
+	}
+	netSeen := map[string]bool{}
+	for i, n := range c.Networks {
+		if n.Name == "" || !nameRe.MatchString(n.Name) {
+			return fmt.Errorf("networks[%d]: invalid name %q", i, n.Name)
+		}
+		if netSeen[n.Name] {
+			return fmt.Errorf("networks[%d]: duplicate name %q", i, n.Name)
+		}
+		netSeen[n.Name] = true
+		if !seen[n.Source] {
+			return fmt.Errorf("network %q: source %q is not a configured source", n.Name, n.Source)
 		}
 	}
 	return nil

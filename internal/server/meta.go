@@ -18,6 +18,7 @@ func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
 			{Href: base + "/conformance", Rel: "conformance", Type: "application/json"},
 			{Href: base + "/collections", Rel: "data", Type: "application/json", Title: "feature collections"},
 			{Href: base + "/catalog", Rel: "catalog", Type: "application/json", Title: "all layers"},
+			{Href: base + "/algorithms", Rel: "algorithms", Type: "application/json", Title: "spatial algorithms"},
 			{Href: base + "/wmts/1.0.0/WMTSCapabilities.xml", Rel: "wmts", Type: "application/xml", Title: "WMTS capabilities"},
 			{Href: base + "/health", Rel: "health", Type: "application/json"},
 		},
