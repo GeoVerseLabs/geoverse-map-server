@@ -148,6 +148,14 @@ Protocol 服务（`internal/mcpserver`）：
 - 零第三方依赖（手写 ~200 行 handler），复用 registry 的既有抽象；
   鉴权 middleware 覆盖 MCP 端点
 
+## 5c. 空间算法插件框架
+
+算法是注册即暴露的插件（HTTP `POST /algorithms/{name}` + MCP
+`algo_{name}` 工具），详见 [ALGORITHMS.md](ALGORITHMS.md)。已实现：
+shortest_path（A*，室内多层）、isochrone（边内插 + marching squares）、
+map_match（Newson-Krumm HMM/Viterbi）、dbscan（网格加速）。路由类算法
+共享 `networks` 配置构建的可路由图（懒构建、进程内缓存）。
+
 ## 6. 配置
 
 单个 YAML 文件（`config.yaml`），`-config` 指定路径：
@@ -204,6 +212,10 @@ internal/source/memengine/   内存要素引擎（MVT 编码、要素查询）
 internal/source/geojsonsrc/  GeoJSON 加载器 → memengine
 internal/source/geopackage/  GeoPackage 加载器（GPB/WKB 解析）→ memengine
 internal/server/         HTTP 服务、路由、handler、middleware
+internal/algo/           算法插件框架（Algorithm/Registry/Env）
+internal/algo/network/   可路由图（多层、构图、索引、Dijkstra/A*）
+internal/algo/routing/   最短路径、等时圈、路径匹配
+internal/algo/cluster/   DBSCAN
 docs/                    设计文档
 examples/                 示例数据与示例配置
 ```

@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
 )
@@ -31,11 +32,16 @@ type Handler struct {
 	// baseURL derives the externally visible URL prefix from a request,
 	// used to embed tile/feature URLs in tool results.
 	baseURL func(*http.Request) string
+	// algos, when non-nil, exposes every registered algorithm as an
+	// MCP tool prefixed "algo_".
+	algos *algo.Registry
+	env   *algo.Env
 }
 
-// New creates an MCP handler.
-func New(reg *registry.Registry, version string, baseURL func(*http.Request) string) *Handler {
-	return &Handler{reg: reg, version: version, baseURL: baseURL}
+// New creates an MCP handler. algos/env may be nil to serve data tools
+// only.
+func New(reg *registry.Registry, version string, baseURL func(*http.Request) string, algos *algo.Registry, env *algo.Env) *Handler {
+	return &Handler{reg: reg, version: version, baseURL: baseURL, algos: algos, env: env}
 }
 
 type rpcRequest struct {
@@ -105,7 +111,7 @@ func (h *Handler) dispatch(r *http.Request, req *rpcRequest) (interface{}, *rpcE
 	case "ping":
 		return map[string]interface{}{}, nil
 	case "tools/list":
-		return map[string]interface{}{"tools": toolDefs()}, nil
+		return map[string]interface{}{"tools": h.toolDefs()}, nil
 	case "tools/call":
 		return h.callTool(r, req.Params)
 	default:
@@ -148,7 +154,25 @@ func objSchema(required []string, props map[string]prop) map[string]interface{} 
 	return s
 }
 
-func toolDefs() []map[string]interface{} {
+func (h *Handler) toolDefs() []map[string]interface{} {
+	defs := staticToolDefs()
+	if h.algos != nil {
+		for _, d := range h.algos.Describe() {
+			desc := d.Description
+			if d.Title != "" {
+				desc = d.Title + ": " + desc
+			}
+			defs = append(defs, map[string]interface{}{
+				"name":        "algo_" + d.Name,
+				"description": desc,
+				"inputSchema": d.InputSchema,
+			})
+		}
+	}
+	return defs
+}
+
+func staticToolDefs() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "list_layers",
@@ -215,12 +239,28 @@ func (h *Handler) callTool(r *http.Request, params json.RawMessage) (interface{}
 	case "server_status":
 		out = h.serverStatus(ctx)
 	default:
+		if a, ok := h.algoFor(p.Name); ok {
+			args := p.Arguments
+			if len(args) == 0 {
+				args = json.RawMessage("{}")
+			}
+			out, err = a.Run(ctx, h.env, args)
+			break
+		}
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("unknown tool %q", p.Name)}
 	}
 	if err != nil {
 		return toolResult(map[string]interface{}{"error": err.Error()}, true), nil
 	}
 	return toolResult(out, false), nil
+}
+
+// algoFor resolves an "algo_"-prefixed tool name to its algorithm.
+func (h *Handler) algoFor(tool string) (algo.Algorithm, bool) {
+	if h.algos == nil || len(tool) <= 5 || tool[:5] != "algo_" {
+		return nil, false
+	}
+	return h.algos.Get(tool[5:])
 }
 
 // toolResult wraps a value as an MCP tool result: JSON text content plus

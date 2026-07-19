@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/network"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/routing"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
 )
@@ -37,7 +40,7 @@ func testHandler(t *testing.T) *Handler {
 		t.Fatal(err)
 	}
 	t.Cleanup(reg.Close)
-	return New(reg, "test", func(*http.Request) string { return "http://example.test" })
+	return New(reg, "test", func(*http.Request) string { return "http://example.test" }, nil, nil)
 }
 
 // rpc posts one JSON-RPC request and decodes the response envelope.
@@ -179,6 +182,63 @@ func TestServerStatusTool(t *testing.T) {
 	out, isErr := callTool(t, h, "server_status", `{}`)
 	if isErr || out["status"] != "ok" {
 		t.Errorf("status: %v (err=%v)", out, isErr)
+	}
+}
+
+func algoHandler(t *testing.T) *Handler {
+	t.Helper()
+	pathsGeoJSON := `{"type":"FeatureCollection","features":[
+		{"type":"Feature","properties":{"name":"ew"},
+		 "geometry":{"type":"LineString","coordinates":[[0,0],[0.001,0],[0.002,0]]}}]}`
+	path := filepath.Join(t.TempDir(), "paths.geojson")
+	if err := os.WriteFile(path, []byte(pathsGeoJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Sources = []config.Source{{Name: "paths", Type: "geojson", Path: path}}
+	reg, err := registry.Build(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reg.Close)
+	algos := algo.NewRegistry()
+	algos.Register(routing.ShortestPath{})
+	env := &algo.Env{
+		Features: reg.FeatureSource,
+		Networks: network.NewManager([]network.NetworkConfig{
+			{Name: "walk", Source: "paths", DefaultSpeedKMH: 5},
+		}, reg.FeatureSource),
+	}
+	return New(reg, "test", func(*http.Request) string { return "http://example.test" }, algos, env)
+}
+
+func TestAlgorithmToolsExposed(t *testing.T) {
+	h := algoHandler(t)
+	resp := rpc(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	tools := resp["result"].(map[string]interface{})["tools"].([]interface{})
+	found := false
+	for _, tl := range tools {
+		if tl.(map[string]interface{})["name"] == "algo_shortest_path" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("algo_shortest_path tool missing")
+	}
+
+	out, isErr := callTool(t, h, "algo_shortest_path",
+		`{"network":"walk","from":[0,0],"to":[0.002,0]}`)
+	if isErr {
+		t.Fatalf("tool error: %v", out)
+	}
+	if out["type"] != "FeatureCollection" {
+		t.Errorf("result: %v", out)
+	}
+
+	// Algorithm user errors surface as tool errors, not RPC errors.
+	if _, isErr := callTool(t, h, "algo_shortest_path",
+		`{"network":"nope","from":[0,0],"to":[0.002,0]}`); !isErr {
+		t.Error("expected tool error for unknown network")
 	}
 }
 

@@ -9,6 +9,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/cluster"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/network"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/routing"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/cache"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/mcpserver"
@@ -18,17 +22,43 @@ import (
 // Version is the server version reported in metadata documents.
 var Version = "dev"
 
-// Server wires the registry, cache and HTTP handlers together.
+// Server wires the registry, cache, algorithms and HTTP handlers together.
 type Server struct {
 	cfg   *config.Config
 	reg   *registry.Registry
 	cache *cache.Tiered
 	log   *slog.Logger
+	algos *algo.Registry
+	env   *algo.Env
 }
 
 // New creates a Server. store may be nil (caching disabled).
 func New(cfg *config.Config, reg *registry.Registry, store *cache.Tiered, log *slog.Logger) *Server {
-	return &Server{cfg: cfg, reg: reg, cache: store, log: log}
+	nets := make([]network.NetworkConfig, 0, len(cfg.Networks))
+	for _, n := range cfg.Networks {
+		nets = append(nets, network.NetworkConfig{
+			Name:            n.Name,
+			Source:          n.Source,
+			DefaultSpeedKMH: n.DefaultSpeedKMH,
+			SpeedField:      n.SpeedField,
+			OnewayField:     n.OnewayField,
+			LevelField:      n.LevelField,
+			NameField:       n.NameField,
+		})
+	}
+	algos := algo.NewRegistry()
+	algos.Register(routing.ShortestPath{})
+	algos.Register(routing.Isochrone{})
+	algos.Register(routing.MapMatch{})
+	algos.Register(cluster.DBSCAN{})
+	return &Server{
+		cfg: cfg, reg: reg, cache: store, log: log,
+		algos: algos,
+		env: &algo.Env{
+			Features: reg.FeatureSource,
+			Networks: network.NewManager(nets, reg.FeatureSource),
+		},
+	}
 }
 
 // Handler builds the full route table wrapped in middleware.
@@ -55,9 +85,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /collections/{id}/items", s.handleItems)
 	mux.HandleFunc("GET /collections/{id}/items/{fid}", s.handleItem)
 
+	// Algorithm endpoints.
+	if s.cfg.Algorithms.On() {
+		mux.HandleFunc("GET /algorithms", s.handleAlgorithms)
+		mux.HandleFunc("GET /algorithms/{name}", s.handleAlgorithmGet)
+		mux.HandleFunc("POST /algorithms/{name}", s.handleAlgorithmRun)
+	}
+
 	// MCP endpoint (Model Context Protocol over Streamable HTTP).
 	if s.cfg.MCP.Enabled {
-		mcp := mcpserver.New(s.reg, Version, s.baseURL)
+		var algos *algo.Registry
+		if s.cfg.Algorithms.On() {
+			algos = s.algos
+		}
+		mcp := mcpserver.New(s.reg, Version, s.baseURL, algos, s.env)
 		mux.Handle(s.cfg.MCP.Path, mcp)
 	}
 

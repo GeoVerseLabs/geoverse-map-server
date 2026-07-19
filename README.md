@@ -10,6 +10,7 @@
 - 两级切片缓存（内存 LRU + 可选磁盘持久缓存）、ETag/304、gzip 协商、CORS、健康检查、优雅退出
 - 可选 **API Key 鉴权**（Bearer / X-API-Key / query 参数三种携带方式）
 - 可选 **MCP 端点**（Model Context Protocol，Streamable HTTP）：LLM 智能体可直接发现图层、查询要素
+- **空间算法插件框架**：最短路径（室内/室外，A*）、等时圈（marching squares 轮廓）、路径匹配（Newson-Krumm HMM）、DBSCAN 聚类（网格加速）；`POST /algorithms/{name}` 与 MCP `algo_*` 工具双入口，详见 [docs/ALGORITHMS.md](docs/ALGORITHMS.md)
 
 架构与详细设计见 [docs/DESIGN.md](docs/DESIGN.md)；开放地理数据的获取渠道
 汇总见 [docs/OPEN_DATA.md](docs/OPEN_DATA.md)。
@@ -87,6 +88,8 @@ EPSG:4326 与 EPSG:3857 图层（3857 自动转 4326）。
 | `GET /collections/{id}` | 集合描述 |
 | `GET /collections/{id}/items?bbox=&limit=&offset=` | 要素查询（GeoJSON）|
 | `GET /collections/{id}/items/{fid}` | 单要素 |
+| `GET /algorithms` | 空间算法清单（自描述 JSON Schema）|
+| `POST /algorithms/{name}` | 执行算法（shortest_path / isochrone / map_match / dbscan）|
 
 切片坐标体系为 WebMercatorQuad（EPSG:3857）。空白区域切片返回 `204 No Content`。
 
@@ -137,7 +140,36 @@ claude mcp add --transport http geoverse http://localhost:8080/mcp \
   --header "X-API-Key: your-secret-key"   # 开了鉴权时
 ```
 
-鉴权开启时 MCP 端点同样受 API Key 保护。
+鉴权开启时 MCP 端点同样受 API Key 保护。开启算法端点后，每个算法还会
+自动成为 `algo_{name}` 工具（如 `algo_shortest_path`、`algo_isochrone`），
+智能体可以直接做路径规划、等时圈、轨迹匹配与聚类分析。
+
+## 空间算法
+
+配置 `networks` 后（从任意 LineString 要素源构建可路由图，支持多层室内），
+即可调用算法端点：
+
+```bash
+# 最短路径（跨楼层：室外入口 → 二层走廊）
+curl -X POST localhost:8080/algorithms/shortest_path \
+  -d '{"network":"campus","from":[116.300,39.990],"to":[116.3055,39.9925],"to_level":2}'
+
+# 等时圈（步行 2 分钟 / 5 分钟）
+curl -X POST localhost:8080/algorithms/isochrone \
+  -d '{"network":"campus","origin":[116.302,39.992],"cutoffs":[120,300]}'
+
+# GPS 轨迹匹配（HMM）
+curl -X POST localhost:8080/algorithms/map_match \
+  -d '{"network":"campus","trace":[[116.3001,39.9901],[116.3010,39.9899],[116.3021,39.9901]]}'
+
+# DBSCAN 聚类
+curl -X POST localhost:8080/algorithms/dbscan \
+  -d '{"collection":"places","eps_m":200000,"min_points":3}'
+```
+
+算法设计、采用的改进（A*、gridded isochrone、Newson-Krumm HMM、网格加速
+DBSCAN）与扩展规划（CH/ALT、OD 矩阵、TSP、HDBSCAN、KDE 等）见
+[docs/ALGORITHMS.md](docs/ALGORITHMS.md)。
 
 ### 在 MapLibre GL 中使用
 
