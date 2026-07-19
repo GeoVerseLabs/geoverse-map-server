@@ -53,6 +53,20 @@ sources:
     title: 中国主要城市
     max_zoom: 14
 
+  # 以下两个图层来自 Natural Earth（公有领域），获取渠道与更多
+  # 开放数据源见 docs/OPEN_DATA.md
+  - name: countries
+    type: geojson
+    path: ./examples/data/ne_110m_admin_0_countries.geojson
+    title: 世界国家边界（Natural Earth 1:110m）
+    max_zoom: 8
+
+  - name: places
+    type: geojson
+    path: ./examples/data/ne_110m_populated_places_simple.geojson
+    title: 世界主要城市（Natural Earth 1:110m）
+    max_zoom: 10
+
   # ── 静态文件：OGC GeoPackage ────────────────────────────────
   # - name: parcels
   #   type: geopackage
