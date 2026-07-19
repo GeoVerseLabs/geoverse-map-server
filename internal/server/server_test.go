@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/cache"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
 	"github.com/paulmach/orb/encoding/mvt"
@@ -41,8 +42,13 @@ func testServer(t *testing.T) *httptest.Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(reg.Close)
+	store, err := cache.NewTiered(cfg.Cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	ts := httptest.NewServer(New(cfg, reg, log).Handler())
+	ts := httptest.NewServer(New(cfg, reg, store, log).Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }

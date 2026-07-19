@@ -1,8 +1,11 @@
 package server
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -51,6 +54,48 @@ func corsMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "*")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// authMiddleware enforces API-key authentication. The key is accepted as
+// `Authorization: Bearer <key>`, an `X-API-Key` header, or an `api_key`
+// query parameter (for clients like QGIS that can only set URLs).
+// /health stays open for load-balancer probes.
+func authMiddleware(apiKeys []string, next http.Handler) http.Handler {
+	// Compare fixed-size digests so key length is not observable.
+	hashes := make([][32]byte, len(apiKeys))
+	for i, k := range apiKeys {
+		hashes[i] = sha256.Sum256([]byte(k))
+	}
+	validKey := func(k string) bool {
+		h := sha256.Sum256([]byte(k))
+		ok := false
+		for _, want := range hashes {
+			if subtle.ConstantTimeCompare(h[:], want[:]) == 1 {
+				ok = true
+			}
+		}
+		return ok
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		key := ""
+		if v := r.Header.Get("Authorization"); strings.HasPrefix(v, "Bearer ") {
+			key = strings.TrimPrefix(v, "Bearer ")
+		} else if v := r.Header.Get("X-API-Key"); v != "" {
+			key = v
+		} else {
+			key = r.URL.Query().Get("api_key")
+		}
+		if key == "" || !validKey(key) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="geoverse"`)
+			writeError(w, http.StatusUnauthorized, "missing or invalid API key")
 			return
 		}
 		next.ServeHTTP(w, r)

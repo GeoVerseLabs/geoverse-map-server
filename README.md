@@ -7,7 +7,9 @@
 - **多数据源统一转换**：
   - 数据库：**PostGIS**（`ST_AsMVT` 动态切片下推，要素查询 bbox 下推）
   - 静态文件：**MBTiles**（矢量/栅格预切片）、**GeoJSON**、**GeoPackage**
-- 内置 LRU+TTL 切片缓存、ETag/304、gzip 协商、CORS、健康检查、优雅退出
+- 两级切片缓存（内存 LRU + 可选磁盘持久缓存）、ETag/304、gzip 协商、CORS、健康检查、优雅退出
+- 可选 **API Key 鉴权**（Bearer / X-API-Key / query 参数三种携带方式）
+- 可选 **MCP 端点**（Model Context Protocol，Streamable HTTP）：LLM 智能体可直接发现图层、查询要素
 
 架构与详细设计见 [docs/DESIGN.md](docs/DESIGN.md)。
 
@@ -77,6 +79,55 @@ EPSG:4326 与 EPSG:3857 图层（3857 自动转 4326）。
 | `GET /collections/{id}/items/{fid}` | 单要素 |
 
 切片坐标体系为 WebMercatorQuad（EPSG:3857）。空白区域切片返回 `204 No Content`。
+
+## 缓存
+
+- **一级**：进程内 LRU + TTL（`cache.max_entries` / `cache.ttl`）
+- **二级**（可选）：磁盘缓存（`cache.disk.*`），原子写入（临时文件 + rename），
+  按文件 mtime 过期，后台守护协程定期清理过期项并在超过 `max_size_mb`
+  时按最旧优先淘汰。重启后依然命中，适合把动态生成的 PostGIS/内存引擎
+  切片"越用越热"地固化下来。
+
+## 鉴权
+
+```yaml
+auth:
+  enabled: true
+  api_keys: ["your-secret-key"]     # 或环境变量 GEOVERSE_API_KEYS=k1,k2
+```
+
+开启后除 `/health` 外全部端点要求 API Key，三种携带方式任选：
+
+```bash
+curl -H "Authorization: Bearer your-secret-key" http://localhost:8080/catalog
+curl -H "X-API-Key: your-secret-key" http://localhost:8080/catalog
+curl "http://localhost:8080/tiles/cities/6/52/24.pbf?api_key=your-secret-key"  # QGIS 等仅支持 URL 的客户端
+```
+
+密钥比较使用 SHA-256 摘要 + 常数时间比较。更复杂的需求（OIDC、配额）建议交给前置网关。
+
+## MCP（供 LLM 智能体调用）
+
+开启 `mcp.enabled` 后，服务在 `mcp.path`（默认 `/mcp`）提供一个
+Model Context Protocol 端点（Streamable HTTP 传输、无状态模式），外部
+Agent（Claude、各类 MCP 客户端）可直接把本服务当作工具箱使用：
+
+| 工具 | 说明 |
+|---|---|
+| `list_layers` | 列出全部图层：格式、范围、zoom、访问 URL |
+| `describe_layer` | 单图层元数据（TileJSON 风格，含矢量字段清单）|
+| `query_features` | 按 bbox/分页查询要素，返回 GeoJSON |
+| `get_feature` | 按 id 取单要素 |
+| `server_status` | 服务与各数据源健康状态 |
+
+在 Claude Code 中接入：
+
+```bash
+claude mcp add --transport http geoverse http://localhost:8080/mcp \
+  --header "X-API-Key: your-secret-key"   # 开了鉴权时
+```
+
+鉴权开启时 MCP 端点同样受 API Key 保护。
 
 ### 在 MapLibre GL 中使用
 
