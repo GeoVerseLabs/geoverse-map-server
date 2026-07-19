@@ -11,6 +11,7 @@ import (
 
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/cache"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/mcpserver"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
 )
 
@@ -21,17 +22,13 @@ var Version = "dev"
 type Server struct {
 	cfg   *config.Config
 	reg   *registry.Registry
-	cache *cache.Cache
+	cache *cache.Tiered
 	log   *slog.Logger
 }
 
-// New creates a Server.
-func New(cfg *config.Config, reg *registry.Registry, log *slog.Logger) *Server {
-	var c *cache.Cache
-	if cfg.Cache.Enabled {
-		c = cache.New(cfg.Cache.MaxEntries, cfg.Cache.TTL)
-	}
-	return &Server{cfg: cfg, reg: reg, cache: c, log: log}
+// New creates a Server. store may be nil (caching disabled).
+func New(cfg *config.Config, reg *registry.Registry, store *cache.Tiered, log *slog.Logger) *Server {
+	return &Server{cfg: cfg, reg: reg, cache: store, log: log}
 }
 
 // Handler builds the full route table wrapped in middleware.
@@ -58,7 +55,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /collections/{id}/items", s.handleItems)
 	mux.HandleFunc("GET /collections/{id}/items/{fid}", s.handleItem)
 
+	// MCP endpoint (Model Context Protocol over Streamable HTTP).
+	if s.cfg.MCP.Enabled {
+		mcp := mcpserver.New(s.reg, Version, s.baseURL)
+		mux.Handle(s.cfg.MCP.Path, mcp)
+	}
+
 	var h http.Handler = mux
+	if s.cfg.Auth.Enabled {
+		h = authMiddleware(s.cfg.Auth.APIKeys, h)
+	}
 	if s.cfg.Server.CORS {
 		h = corsMiddleware(h)
 	}

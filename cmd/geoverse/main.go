@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/cache"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/server"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
@@ -60,8 +61,23 @@ func run(configPath string, log *slog.Logger) error {
 		log.Info("source ready", "name", name)
 	}
 
+	store, err := cache.NewTiered(cfg.Cache)
+	if err != nil {
+		return fmt.Errorf("init cache: %w", err)
+	}
+	defer store.Close()
+	if cfg.Cache.Disk.Enabled {
+		log.Info("disk cache enabled", "dir", cfg.Cache.Disk.Dir, "ttl", cfg.Cache.Disk.TTL.String())
+	}
+	if cfg.Auth.Enabled {
+		log.Info("api key auth enabled", "keys", len(cfg.Auth.APIKeys))
+	}
+	if cfg.MCP.Enabled {
+		log.Info("mcp endpoint enabled", "path", cfg.MCP.Path)
+	}
+
 	server.Version = version
-	srv := server.New(cfg, reg, log)
+	srv := server.New(cfg, reg, store, log)
 	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 	httpSrv := &http.Server{
 		Addr:              addr,

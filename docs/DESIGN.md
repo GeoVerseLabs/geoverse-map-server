@@ -114,9 +114,39 @@ GeoJSON 与 GeoPackage 共享同一个内存引擎：
 
 ## 5. 缓存
 
-- 进程内 LRU + TTL（`internal/cache`），key = `layer/z/x/y.ext`
-- 按条目数上限淘汰；MBTiles 本身就是文件读取，默认跳过缓存
+两级结构（`internal/cache`），key = `layer/z/x/y`：
+
+- **一级（内存）**：LRU + TTL，按条目数上限淘汰
+- **二级（磁盘，可选）**：普通文件存储（`dir/layer/z/x/y`），临时文件 +
+  rename 原子写入；按 mtime 判定 TTL 过期；janitor 协程每 5 分钟清理
+  过期项与孤儿临时文件，超过 `max_size_mb` 时按最旧优先淘汰到 90% 水位。
+  磁盘命中会回填（promote）到内存一级。
+- key 段经过白名单校验（并显式拒绝 `.`/`..`），杜绝路径穿越
+- MBTiles 本身就是本地文件读取，标记 `Cacheable=false` 跳过缓存
 - 响应带 `ETag`（内容哈希），支持 `If-None-Match` → 304
+
+## 5a. 鉴权
+
+简单 API Key 方案（`auth.enabled`）：middleware 层拦截，`/health` 豁免
+（负载均衡探活）。key 可来自配置或 `GEOVERSE_API_KEYS` 环境变量；接受
+`Authorization: Bearer`、`X-API-Key` 头或 `api_key` query 参数。比较时
+先做 SHA-256 摘要再常数时间比较，避免时序侧信道。定位是"轻量内网/小
+团队"场景；OIDC、限流等交由前置反向代理。
+
+## 5b. MCP 端点
+
+`mcp.enabled` 开启后在 `mcp.path`（默认 `/mcp`）暴露 Model Context
+Protocol 服务（`internal/mcpserver`）：
+
+- 传输：Streamable HTTP，无状态模式（单 POST → 单 JSON 响应，不提供
+  SSE 流；GET 返回 405，符合规范中 server MAY not support 的约定）
+- 协议：JSON-RPC 2.0，实现 `initialize` / `ping` / `tools/list` /
+  `tools/call`，协议版本协商支持 2024-11-05 / 2025-03-26 / 2025-06-18
+- 工具：`list_layers`、`describe_layer`、`query_features`、
+  `get_feature`、`server_status`；结果同时以 text 与 structuredContent
+  返回
+- 零第三方依赖（手写 ~200 行 handler），复用 registry 的既有抽象；
+  鉴权 middleware 覆盖 MCP 端点
 
 ## 6. 配置
 
@@ -165,7 +195,8 @@ sources:
 cmd/geoverse/            入口（flag 解析、优雅退出）
 internal/config/         YAML 配置解析与校验
 internal/tilemath/       Web Mercator 切片数学（z/x/y ↔ bbox）
-internal/cache/          LRU + TTL 缓存
+internal/cache/          两级缓存（内存 LRU + 磁盘持久层）
+internal/mcpserver/      MCP 端点（JSON-RPC / Streamable HTTP）
 internal/source/         接口定义 + registry（按配置构建数据源）
 internal/source/postgis/     PostGIS 实现
 internal/source/mbtiles/     MBTiles 实现
@@ -181,7 +212,7 @@ examples/                 示例数据与示例配置
 
 - 不做栅格动态渲染（WMS GetMap 渲染引擎），栅格仅透传 MBTiles 已有切片
 - 不做坐标系重投影服务（统一 WebMercatorQuad 输出，源数据支持 4326/3857）
-- 不做鉴权/多租户（可由前置反向代理承担）；预留 middleware 挂点
+- 鉴权仅到简单 API Key 一层；OIDC/配额/多租户由前置反向代理承担
 
 ## 9. 部署
 

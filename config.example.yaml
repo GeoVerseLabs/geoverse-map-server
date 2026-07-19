@@ -10,8 +10,23 @@ server:
 
 cache:
   enabled: true
-  max_entries: 10000   # 进程内 LRU 缓存的切片条数上限
+  max_entries: 10000   # 进程内 LRU 缓存的切片条数上限（一级缓存）
   ttl: 5m
+  disk:                # 磁盘二级缓存：重启后依然有效，按 mtime 过期
+    enabled: false
+    dir: ./tile-cache
+    ttl: 24h
+    max_size_mb: 512   # 超限时后台清理，按最旧优先淘汰；0 = 不限制
+
+auth:                  # 简单 API Key 鉴权（/health 豁免）
+  enabled: false
+  api_keys: []         # 也可用环境变量 GEOVERSE_API_KEYS=key1,key2 追加
+  # 客户端可用三种方式携带 key：
+  #   Authorization: Bearer <key> / X-API-Key: <key> / ?api_key=<key>
+
+mcp:                   # Model Context Protocol 端点（Streamable HTTP）
+  enabled: false       # 开启后 LLM 智能体可通过 /mcp 发现图层、查询要素
+  path: /mcp
 
 sources:
   # ── 数据库：PostGIS 动态矢量切片（需要 PostGIS >= 3.0）──────────

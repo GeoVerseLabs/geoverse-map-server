@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -15,6 +16,8 @@ import (
 type Config struct {
 	Server  Server   `yaml:"server"`
 	Cache   Cache    `yaml:"cache"`
+	Auth    Auth     `yaml:"auth"`
+	MCP     MCP      `yaml:"mcp"`
 	Sources []Source `yaml:"sources"`
 }
 
@@ -29,11 +32,35 @@ type Server struct {
 	Timeout time.Duration `yaml:"timeout"`
 }
 
-// Cache holds tile cache settings.
+// Cache holds tile cache settings (in-memory first tier plus an
+// optional disk-backed second tier).
 type Cache struct {
 	Enabled    bool          `yaml:"enabled"`
 	MaxEntries int           `yaml:"max_entries"`
 	TTL        time.Duration `yaml:"ttl"`
+	Disk       DiskCache     `yaml:"disk"`
+}
+
+// DiskCache holds the persistent second-tier cache settings.
+type DiskCache struct {
+	Enabled   bool          `yaml:"enabled"`
+	Dir       string        `yaml:"dir"`
+	TTL       time.Duration `yaml:"ttl"`
+	MaxSizeMB int64         `yaml:"max_size_mb"`
+}
+
+// Auth holds API-key authentication settings. Keys may also be supplied
+// via the GEOVERSE_API_KEYS environment variable (comma-separated), which
+// is appended to api_keys at load time.
+type Auth struct {
+	Enabled bool     `yaml:"enabled"`
+	APIKeys []string `yaml:"api_keys"`
+}
+
+// MCP holds the Model Context Protocol endpoint settings.
+type MCP struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
 }
 
 // Source describes one configured data source. Fields are a union across
@@ -78,6 +105,13 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
+	if env := os.Getenv("GEOVERSE_API_KEYS"); env != "" {
+		for _, k := range strings.Split(env, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				cfg.Auth.APIKeys = append(cfg.Auth.APIKeys, k)
+			}
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -97,6 +131,16 @@ func Default() *Config {
 			Enabled:    true,
 			MaxEntries: 10000,
 			TTL:        5 * time.Minute,
+			Disk: DiskCache{
+				Enabled:   false,
+				Dir:       "./tile-cache",
+				TTL:       24 * time.Hour,
+				MaxSizeMB: 512,
+			},
+		},
+		MCP: MCP{
+			Enabled: false,
+			Path:    "/mcp",
 		},
 	}
 }
@@ -105,6 +149,15 @@ func Default() *Config {
 func (c *Config) Validate() error {
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port %d out of range", c.Server.Port)
+	}
+	if c.Auth.Enabled && len(c.Auth.APIKeys) == 0 {
+		return fmt.Errorf("auth.enabled is true but no api_keys configured (yaml or GEOVERSE_API_KEYS)")
+	}
+	if c.Cache.Disk.Enabled && c.Cache.Disk.Dir == "" {
+		return fmt.Errorf("cache.disk.enabled is true but cache.disk.dir is empty")
+	}
+	if c.MCP.Enabled && !strings.HasPrefix(c.MCP.Path, "/") {
+		return fmt.Errorf("mcp.path must start with '/'")
 	}
 	if len(c.Sources) == 0 {
 		return fmt.Errorf("no sources configured")
