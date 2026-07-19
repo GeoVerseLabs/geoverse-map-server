@@ -11,7 +11,8 @@
 - 可选 **API Key 鉴权**（Bearer / X-API-Key / query 参数三种携带方式）
 - 可选 **MCP 端点**（Model Context Protocol，Streamable HTTP）：LLM 智能体可直接发现图层、查询要素
 
-架构与详细设计见 [docs/DESIGN.md](docs/DESIGN.md)。
+架构与详细设计见 [docs/DESIGN.md](docs/DESIGN.md)；开放地理数据的获取渠道
+汇总见 [docs/OPEN_DATA.md](docs/OPEN_DATA.md)。
 
 ## 快速开始
 
@@ -19,6 +20,15 @@
 make build                                # 产出 bin/geoverse（静态二进制）
 ./bin/geoverse -config config.example.yaml
 ```
+
+示例配置自带三个开箱即用的图层（数据在 `examples/data/`，来源与许可见
+[docs/OPEN_DATA.md](docs/OPEN_DATA.md)）：
+
+- `countries` —— 世界国家边界，Natural Earth 1:110m（公有领域）
+- `places` —— 世界主要城市点，Natural Earth 1:110m（公有领域）
+- `cities` —— 中国主要城市演示数据
+
+启动后用浏览器打开 `examples/viewer.html` 可直接看到三层叠加的矢量切片渲染。
 
 验证：
 
@@ -152,12 +162,15 @@ docker run -p 8080:8080 \
 ## 开发
 
 ```bash
-make test   # 单元 + 集成测试
+make test   # 单元 + 集成测试（无需外部服务）
 make vet
 ```
 
-代码布局见 [docs/DESIGN.md](docs/DESIGN.md) 第 7 节。
+代码布局见 [docs/DESIGN.md](docs/DESIGN.md) 第 7 节，贡献流程见
+[CONTRIBUTING.md](CONTRIBUTING.md)。CI（gofmt / vet / test -race / build /
+docker build）见 `.github/workflows/ci.yml`。
 
 ## 许可
 
-MIT
+代码以 [MIT](LICENSE) 许可发布。`examples/data/` 中的 Natural Earth 数据
+为公有领域（Made with Natural Earth），自制演示数据随项目 MIT。

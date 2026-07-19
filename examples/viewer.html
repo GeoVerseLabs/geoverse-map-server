@@ -18,10 +18,20 @@
     style: {
       version: 8,
       sources: {
+        countries: { type: 'vector', url: base + '/tiles/countries.json' },
+        places: { type: 'vector', url: base + '/tiles/places.json' },
         cities: { type: 'vector', url: base + '/tiles/cities.json' }
       },
       layers: [
-        { id: 'bg', type: 'background', paint: { 'background-color': '#f0ede5' } },
+        { id: 'bg', type: 'background', paint: { 'background-color': '#aad3df' } },
+        {
+          id: 'countries-fill', type: 'fill', source: 'countries', 'source-layer': 'countries',
+          paint: { 'fill-color': '#f0ede5', 'fill-outline-color': '#b3a98c' }
+        },
+        {
+          id: 'places', type: 'circle', source: 'places', 'source-layer': 'places',
+          paint: { 'circle-radius': 3, 'circle-color': '#7f8c8d' }
+        },
         {
           id: 'cities', type: 'circle', source: 'cities', 'source-layer': 'cities',
           paint: { 'circle-radius': 6, 'circle-color': '#c0392b', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' }
@@ -29,7 +39,7 @@
       ]
     },
     center: [110, 33],
-    zoom: 4
+    zoom: 3
   });
   map.addControl(new maplibregl.NavigationControl());
   map.on('click', 'cities', e => {
