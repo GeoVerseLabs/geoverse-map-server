@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -24,6 +25,23 @@ type Disk struct {
 
 	stopOnce sync.Once
 	stop     chan struct{}
+
+	hits   atomic.Uint64
+	misses atomic.Uint64
+}
+
+// DiskStats is a point-in-time snapshot of the disk tier. Files/Bytes are
+// measured by walking the cache directory, so callers should treat Stats
+// as an operator-facing diagnostic rather than a hot-path metric.
+type DiskStats struct {
+	Dir        string  `json:"dir"`
+	Files      int     `json:"files"`
+	Bytes      int64   `json:"bytes"`
+	MaxBytes   int64   `json:"maxBytes"`
+	Hits       uint64  `json:"hits"`
+	Misses     uint64  `json:"misses"`
+	HitRate    float64 `json:"hitRate"`
+	TTLSeconds float64 `json:"ttlSeconds"`
 }
 
 // NewDisk creates the cache directory (if needed) and starts the janitor.
@@ -63,20 +81,25 @@ func (d *Disk) Get(key string) ([]byte, bool) {
 	}
 	p := d.path(key)
 	if p == "" {
+		d.misses.Add(1)
 		return nil, false
 	}
 	fi, err := os.Stat(p)
 	if err != nil {
+		d.misses.Add(1)
 		return nil, false
 	}
 	if d.ttl > 0 && time.Since(fi.ModTime()) > d.ttl {
 		_ = os.Remove(p)
+		d.misses.Add(1)
 		return nil, false
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
+		d.misses.Add(1)
 		return nil, false
 	}
+	d.hits.Add(1)
 	return data, true
 }
 
@@ -110,6 +133,55 @@ func (d *Disk) Set(key string, value []byte) {
 	if err := os.Rename(name, p); err != nil {
 		_ = os.Remove(name)
 	}
+}
+
+// Purge deletes every cached file, returning how many were removed. The
+// cache directory itself is kept so that subsequent writes need no mkdir.
+func (d *Disk) Purge() int {
+	if d == nil {
+		return 0
+	}
+	n := 0
+	_ = filepath.WalkDir(d.dir, func(path string, de os.DirEntry, err error) error {
+		if err != nil || de.IsDir() {
+			return nil
+		}
+		if os.Remove(path) == nil {
+			n++
+		}
+		return nil
+	})
+	return n
+}
+
+// Stats snapshots the disk tier, walking the cache directory to size it.
+func (d *Disk) Stats() DiskStats {
+	if d == nil {
+		return DiskStats{}
+	}
+	s := DiskStats{
+		Dir:        d.dir,
+		MaxBytes:   d.maxBytes,
+		Hits:       d.hits.Load(),
+		Misses:     d.misses.Load(),
+		TTLSeconds: d.ttl.Seconds(),
+	}
+	_ = filepath.WalkDir(d.dir, func(_ string, de os.DirEntry, err error) error {
+		if err != nil || de.IsDir() {
+			return nil
+		}
+		fi, err := de.Info()
+		if err != nil {
+			return nil
+		}
+		s.Files++
+		s.Bytes += fi.Size()
+		return nil
+	})
+	if total := s.Hits + s.Misses; total > 0 {
+		s.HitRate = float64(s.Hits) / float64(total)
+	}
+	return s
 }
 
 // Close stops the janitor goroutine.

@@ -124,3 +124,66 @@ func TestTieredDisabled(t *testing.T) {
 	}
 	tc.Close()
 }
+
+func TestDiskStatsAndPurge(t *testing.T) {
+	dir := t.TempDir()
+	d, err := NewDisk(dir, time.Hour, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+
+	d.Set("layer/1/2/3", []byte("abcd"))
+	d.Set("layer/1/2/4", []byte("ef"))
+	d.Get("layer/1/2/3") // hit
+	d.Get("layer/9/9/9") // miss
+
+	s := d.Stats()
+	if s.Files != 2 || s.Bytes != 6 {
+		t.Errorf("files/bytes = %d/%d, want 2/6", s.Files, s.Bytes)
+	}
+	if s.Hits != 1 || s.Misses != 1 {
+		t.Errorf("hits/misses = %d/%d, want 1/1", s.Hits, s.Misses)
+	}
+
+	if n := d.Purge(); n != 2 {
+		t.Errorf("Purge = %d, want 2", n)
+	}
+	if got := d.Stats().Files; got != 0 {
+		t.Errorf("files after purge = %d, want 0", got)
+	}
+	// The directory itself must survive so later writes need no mkdir.
+	if _, err := os.Stat(dir); err != nil {
+		t.Errorf("cache dir removed by purge: %v", err)
+	}
+	d.Set("layer/1/2/3", []byte("z"))
+	if _, ok := d.Get("layer/1/2/3"); !ok {
+		t.Error("cache unusable after purge")
+	}
+}
+
+func TestTieredStatsDistinguishesOffFromEmpty(t *testing.T) {
+	// Memory-only: the disk block must be absent, not a zeroed struct —
+	// an all-zero DiskStats would read as "disk cache on but empty".
+	tc, err := NewTiered(config.Cache{Enabled: true, MaxEntries: 4, TTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tc.Close()
+	s := tc.Stats()
+	if !s.Enabled || s.Memory == nil {
+		t.Errorf("memory tier missing: %+v", s)
+	}
+	if s.Disk != nil {
+		t.Errorf("disk tier is off, must be omitted: %+v", s.Disk)
+	}
+
+	// Caching disabled entirely.
+	var off *Tiered
+	if off.Stats().Enabled {
+		t.Error("nil cache must report Enabled=false")
+	}
+	if m, d := off.Purge(); m != 0 || d != 0 {
+		t.Errorf("nil purge = %d/%d, want 0/0", m, d)
+	}
+}

@@ -50,7 +50,9 @@ func logMiddleware(log *slog.Logger, next http.Handler) http.Handler {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+		// POST is needed by /algorithms/{name}, DELETE by /admin/cache;
+		// listing only GET/HEAD made browser clients fail preflight on both.
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "*")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -63,7 +65,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 // authMiddleware enforces API-key authentication. The key is accepted as
 // `Authorization: Bearer <key>`, an `X-API-Key` header, or an `api_key`
 // query parameter (for clients like QGIS that can only set URLs).
-// /health stays open for load-balancer probes.
+// /health and /readyz stay open for load-balancer and orchestrator probes,
+// which have no way to carry a key. Both only ever report source liveness,
+// never data.
 func authMiddleware(apiKeys []string, next http.Handler) http.Handler {
 	// Compare fixed-size digests so key length is not observable.
 	hashes := make([][32]byte, len(apiKeys))
@@ -81,7 +85,7 @@ func authMiddleware(apiKeys []string, next http.Handler) http.Handler {
 		return ok
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" {
+		if r.URL.Path == "/health" || r.URL.Path == "/readyz" {
 			next.ServeHTTP(w, r)
 			return
 		}

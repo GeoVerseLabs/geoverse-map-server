@@ -24,12 +24,14 @@ var Version = "dev"
 
 // Server wires the registry, cache, algorithms and HTTP handlers together.
 type Server struct {
-	cfg   *config.Config
-	reg   *registry.Registry
-	cache *cache.Tiered
-	log   *slog.Logger
-	algos *algo.Registry
-	env   *algo.Env
+	cfg     *config.Config
+	reg     *registry.Registry
+	cache   *cache.Tiered
+	log     *slog.Logger
+	algos   *algo.Registry
+	env     *algo.Env
+	metrics *metrics
+	ready   readiness
 }
 
 // New creates a Server. store may be nil (caching disabled).
@@ -53,7 +55,8 @@ func New(cfg *config.Config, reg *registry.Registry, store *cache.Tiered, log *s
 	algos.Register(cluster.DBSCAN{})
 	return &Server{
 		cfg: cfg, reg: reg, cache: store, log: log,
-		algos: algos,
+		algos:   algos,
+		metrics: newMetrics(),
 		env: &algo.Env{
 			Features: reg.FeatureSource,
 			Networks: network.NewManager(nets, reg.FeatureSource),
@@ -69,7 +72,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleLanding)
 	mux.HandleFunc("GET /conformance", s.handleConformance)
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.HandleFunc("GET /catalog", s.handleCatalog)
+
+	// Operations. /metrics and /admin/* stay behind API-key auth when it is
+	// enabled — they expose source names and cache behaviour, and the purge
+	// endpoint mutates state. Only the two probes are exempt (see
+	// authMiddleware), because a load balancer cannot carry a key.
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.HandleFunc("GET /admin/stats", s.handleStats)
+	mux.HandleFunc("DELETE /admin/cache", s.handlePurgeCache)
 
 	// Tiles.
 	mux.HandleFunc("GET /tiles/{layer}/{z}/{x}/{yext}", s.handleTile)
@@ -110,6 +122,10 @@ func (s *Server) Handler() http.Handler {
 		h = corsMiddleware(h)
 	}
 	h = recoverMiddleware(s.log, h)
+	// Metrics sit outside recover so a panicking handler still counts as
+	// the 500 the client saw, and outside auth so rejected requests are
+	// visible — an unauthenticated flood is exactly what you want graphed.
+	h = metricsMiddleware(s.metrics, h)
 	h = logMiddleware(s.log, h)
 	return h
 }

@@ -78,6 +78,13 @@ func (r *Registry) Get(name string) (Algorithm, bool) {
 	return a, ok
 }
 
+// Names returns every algorithm name in registration order.
+func (r *Registry) Names() []string {
+	out := make([]string, len(r.order))
+	copy(out, r.order)
+	return out
+}
+
 // Describe returns descriptors for every algorithm in registration order.
 func (r *Registry) Describe() []Descriptor {
 	out := make([]Descriptor, 0, len(r.order))

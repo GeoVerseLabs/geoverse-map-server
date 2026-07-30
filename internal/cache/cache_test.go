@@ -54,3 +54,56 @@ func TestDisabled(t *testing.T) {
 		t.Fatal("nil cache must miss")
 	}
 }
+
+func TestStatsCountsHitsMissesAndEvictions(t *testing.T) {
+	c := New(2, time.Minute)
+	c.Set("a", []byte("12345"))
+	c.Set("b", []byte("67"))
+	c.Get("a")              // hit
+	c.Get("nope")           // miss
+	c.Set("c", []byte("8")) // evicts LRU ("b")
+
+	s := c.Stats()
+	if s.Hits != 1 || s.Misses != 1 {
+		t.Errorf("hits/misses = %d/%d, want 1/1", s.Hits, s.Misses)
+	}
+	if s.Evictions != 1 {
+		t.Errorf("evictions = %d, want 1", s.Evictions)
+	}
+	if s.Entries != 2 || s.MaxEntries != 2 {
+		t.Errorf("entries = %d/%d, want 2/2", s.Entries, s.MaxEntries)
+	}
+	// "a" (5B) + "c" (1B); "b" was evicted and must not still be counted.
+	if s.Bytes != 6 {
+		t.Errorf("bytes = %d, want 6", s.Bytes)
+	}
+	if s.HitRate != 0.5 {
+		t.Errorf("hitRate = %v, want 0.5", s.HitRate)
+	}
+}
+
+func TestPurgeEmptiesButKeepsCounters(t *testing.T) {
+	c := New(10, time.Minute)
+	c.Set("a", []byte("1"))
+	c.Set("b", []byte("2"))
+	c.Get("a")
+
+	if n := c.Purge(); n != 2 {
+		t.Errorf("Purge = %d, want 2", n)
+	}
+	if c.Len() != 0 {
+		t.Errorf("Len after purge = %d, want 0", c.Len())
+	}
+	s := c.Stats()
+	if s.Bytes != 0 {
+		t.Errorf("bytes after purge = %d, want 0", s.Bytes)
+	}
+	// Lifetime counters describe the process, not the current contents:
+	// resetting them would erase the evidence an operator purged to inspect.
+	if s.Hits != 1 {
+		t.Errorf("hits after purge = %d, want 1 (counters must survive)", s.Hits)
+	}
+	if n := c.Purge(); n != 0 {
+		t.Errorf("second Purge = %d, want 0 (idempotent)", n)
+	}
+}

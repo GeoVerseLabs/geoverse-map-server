@@ -21,6 +21,8 @@ func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
 			{Href: base + "/algorithms", Rel: "algorithms", Type: "application/json", Title: "spatial algorithms"},
 			{Href: base + "/wmts/1.0.0/WMTSCapabilities.xml", Rel: "wmts", Type: "application/xml", Title: "WMTS capabilities"},
 			{Href: base + "/health", Rel: "health", Type: "application/json"},
+			{Href: base + "/readyz", Rel: "readiness", Type: "application/json"},
+			{Href: base + "/metrics", Rel: "metrics", Type: "text/plain", Title: "Prometheus metrics"},
 		},
 	})
 }
