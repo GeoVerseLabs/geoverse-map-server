@@ -1,0 +1,73 @@
+# Bare-metal / VM deployment without Docker.
+#
+# Install:
+#   sudo install -m 0755 bin/geoverse /usr/local/bin/geoverse
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin geoverse
+#   sudo mkdir -p /etc/geoverse /var/lib/geoverse
+#   sudo cp config.example.yaml /etc/geoverse/config.yaml
+#   sudo chown -R geoverse:geoverse /var/lib/geoverse
+#   sudo cp deploy/systemd/geoverse-map-server.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now geoverse-map-server
+
+[Unit]
+Description=GeoVerse Map Server
+Documentation=https://github.com/GeoVerseLabs/geoverse-map-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=geoverse
+Group=geoverse
+
+# Fail fast on a bad config: validate opens every source, so a missing
+# .mbtiles or unreachable PostGIS stops the unit here with a readable
+# error instead of after the port is already bound.
+ExecStartPre=/usr/local/bin/geoverse -validate -config /etc/geoverse/config.yaml
+ExecStart=/usr/local/bin/geoverse -config /etc/geoverse/config.yaml
+
+# The server installs a SIGTERM handler and drains in-flight requests, so
+# let it finish rather than killing it.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=5s
+
+# API keys belong in a root-owned 0600 file, not in the unit or in
+# config.yaml — `systemctl show` and `ps` both expose Environment=.
+# Contents: GEOVERSE_API_KEYS=key1,key2
+EnvironmentFile=-/etc/geoverse/geoverse.env
+
+# ── Sandboxing ────────────────────────────────────────────────
+# A static binary that reads config/data and writes only its tile cache
+# needs almost nothing from the host.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+
+# The only writable path: the disk tile cache. Point cache.disk.dir at
+# /var/lib/geoverse in config.yaml.
+ReadWritePaths=/var/lib/geoverse
+
+# Binding 8080 needs no capability; drop them all. Add
+# AmbientCapabilities=CAP_NET_BIND_SERVICE only if you move to port 80/443.
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

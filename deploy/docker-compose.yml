@@ -1,0 +1,82 @@
+# GeoVerse Map Server — single-container static publishing.
+#
+# Usage:
+#   cd deploy && cp .env.example .env && $EDITOR .env
+#   docker compose up -d
+#
+# Layout assumed by the bind mounts:
+#   ./config.yaml   your service config (start from ../config.example.yaml)
+#   ./data/         your .mbtiles / .geojson / .gpkg files
+#
+# The PostGIS service is behind a profile and off by default: v0.1's target
+# is static, read-only publishing, and a database that nothing references
+# should not be part of the minimal deployment. Enable it with
+# `docker compose --profile postgis up -d`.
+
+services:
+  map-server:
+    image: ${IMAGE:-geoverse-map-server:dev}
+    build:
+      context: ..
+      args:
+        VERSION: ${VERSION:-dev}
+    container_name: geoverse-map-server
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${PORT:-8080}:8080"
+    volumes:
+      # Config and data are read-only to the container: it only ever reads
+      # them, so mounting rw would grant write access for no reason.
+      - ./config.yaml:/etc/geoverse/config.yaml:ro
+      - ./data:/data:ro
+      # The disk tile cache is the one path the process writes to. It is a
+      # named volume rather than a bind mount so it survives `down` without
+      # leaving root-owned files in the repo.
+      - tile-cache:/var/cache/geoverse
+    environment:
+      # Keys stay out of the image and out of config.yaml. Comma-separated.
+      GEOVERSE_API_KEYS: ${GEOVERSE_API_KEYS:-}
+    # Hardening: the binary is static and writes only to the cache volume,
+    # so it needs neither a writable root nor any privilege escalation.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      # /tmp is needed for atomic cache writes (temp file + rename) when the
+      # cache dir is on a read-only layer; small and noexec by policy.
+      - /tmp:size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: a PostGIS instance for dynamic vector tiles (v0.2 territory).
+  postgis:
+    profiles: ["postgis"]
+    image: postgis/postgis:16-3.4
+    container_name: geoverse-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB:-gis}
+      POSTGRES_USER: ${PG_USER:-geoverse}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-geoverse} -d ${PG_DB:-gis}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tile-cache:
+  pgdata:

@@ -28,6 +28,7 @@ var version = "dev" // injected via -ldflags "-X main.version=..."
 func main() {
 	configPath := flag.String("config", "config.yaml", "path to YAML configuration")
 	showVersion := flag.Bool("version", false, "print version and exit")
+	validate := flag.Bool("validate", false, "load config, open every source, then exit (0 = deployable)")
 	flag.Parse()
 
 	if *showVersion {
@@ -35,10 +36,53 @@ func main() {
 		return
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if *validate {
+		if err := validateConfig(*configPath, log); err != nil {
+			log.Error("config invalid", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(*configPath, log); err != nil {
 		log.Error("fatal", "error", err)
 		os.Exit(1)
 	}
+}
+
+// validateConfig parses the config and actually opens every source, then
+// tears everything down without binding a port.
+//
+// Opening the sources is the point: a config that parses but points at a
+// missing .mbtiles or an unreachable PostGIS is exactly the failure worth
+// catching in CI or in a container's pre-start hook, rather than at 3am
+// when the new pod fails its readiness probe.
+func validateConfig(configPath string, log *slog.Logger) error {
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	reg, err := registry.Build(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer reg.Close()
+
+	failed := false
+	for name, perr := range reg.Ping(ctx) {
+		if perr != nil {
+			log.Error("source unreachable", "name", name, "error", perr)
+			failed = true
+			continue
+		}
+		log.Info("source ok", "name", name)
+	}
+	if failed {
+		return errors.New("one or more sources are unreachable")
+	}
+	log.Info("config valid", "path", configPath, "sources", len(reg.Names()))
+	return nil
 }
 
 func run(configPath string, log *slog.Logger) error {

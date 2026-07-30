@@ -1,0 +1,31 @@
+# Docker build context exclusions.
+#
+# Without this file the context is ~1.2 GB: `.tools/go` is a vendored Go
+# toolchain (252 MB) and `.cache/` holds the module + build caches (896 MB).
+# Both are local development conveniences that the multi-stage build has no
+# use for — the build stage starts from golang:1.25-alpine and runs its own
+# `go mod download`. Shipping them just made every `docker build` upload a
+# gigabyte before doing any work.
+
+# Local Go toolchain and caches (see GO_ENVIRONMENT_zh.md).
+.tools/
+.cache/
+
+# Build artifacts — the image builds its own.
+bin/
+
+# VCS and CI.
+.git/
+.github/
+.gitignore
+
+# Docs and examples that do not belong in an image layer.
+# NOTE: examples/data/ is deliberately NOT excluded — config.example.yaml
+# references it, so `docker run` with the sample config works out of the box.
+*.md
+docs/
+deploy/
+
+# Local operator config: real deployments bind-mount their own.
+config.yaml
+tile-cache/

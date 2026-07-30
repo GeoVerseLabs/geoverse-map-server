@@ -78,7 +78,11 @@ EPSG:4326 与 EPSG:3857 图层（3857 自动转 4326）。
 |---|---|
 | `GET /` | 服务元数据（OGC API landing page）|
 | `GET /conformance` | OGC API 一致性声明 |
-| `GET /health` | 健康检查（逐数据源）|
+| `GET /health` | 健康检查（逐数据源，每次重新 ping）|
+| `GET /readyz` | 就绪探针（结果缓存 5s，供编排器高频探活）|
+| `GET /metrics` | Prometheus 文本格式指标 |
+| `GET /admin/stats` | 缓存命中率、运行时与请求统计（JSON）|
+| `DELETE /admin/cache` | 清空两级切片缓存（幂等）|
 | `GET /catalog` | 全部图层清单与访问 URL |
 | `GET /tiles/{layer}/{z}/{x}/{y}.pbf` | XYZ 切片（栅格源为 .png/.jpg/.webp）|
 | `GET /tiles/{layer}.json` | TileJSON 3.0 |
@@ -181,7 +185,23 @@ map.addLayer({ id: 'cities', type: 'circle', source: 'cities', 'source-layer': '
 QGIS：`图层 → 添加图层 → WMTS` 指向 capabilities 地址，或直接添加
 Vector Tiles / OGC API - Features 连接。
 
-## Docker 部署
+## 部署
+
+上线前先自检——`-validate` 会真正打开每个数据源并 ping 一遍再退出，
+退出码 0 即「这份配置可以上线」：
+
+```bash
+geoverse -validate -config config.yaml
+```
+
+最快的方式是 Docker Compose（已配好只读根文件系统、非 root、cap drop、
+健康检查与缓存卷）：
+
+```bash
+cd deploy && cp .env.example .env && docker compose up -d
+```
+
+单容器：
 
 ```bash
 make docker
@@ -190,6 +210,13 @@ docker run -p 8080:8080 \
   -v $(pwd)/data:/data \
   geoverse-map-server:dev
 ```
+
+systemd、Kubernetes、nginx 反代、可观测与升级回滚见 **[DEPLOY.md](DEPLOY.md)**；
+现成配置在 [`deploy/`](deploy/)。
+
+> 两个探针（`/health`、`/readyz`）**豁免 API Key**——负载均衡器无法携带密钥，
+> 而它们只报数据源存活、不返回数据。`/metrics` 与 `/admin/*` 则要求鉴权，
+> 且不建议公网暴露。
 
 ## 开发
 
@@ -201,6 +228,14 @@ make vet
 代码布局见 [docs/DESIGN.md](docs/DESIGN.md) 第 7 节，贡献流程见
 [CONTRIBUTING.md](CONTRIBUTING.md)。CI（gofmt / vet / test -race / build /
 docker build）见 `.github/workflows/ci.yml`。
+
+> **Go 版本**：`go.mod` 声明 1.25，因为依赖 `modernc.org/sqlite` 与 `jackc/pgx/v5`
+> 自身要求 1.25。改低会让 `go build`/`go vet` 直接失败（不是警告，是拒绝构建），
+> 所以 go.mod、Dockerfile 的 builder 镜像、CI 的 `setup-go` 三处版本必须一起动。
+
+本机开发若无系统 Go，仓库内置了一份工具链，见 [GO_ENVIRONMENT_zh.md](GO_ENVIRONMENT_zh.md)。
+注意 Windows 上 `git config core.autocrlf=true` 会让工作区文件是 CRLF，
+`gofmt -l .` 因此列出所有文件——这是本地假阳性，CI（Linux/LF）看到的是干净的。
 
 ## 许可
 
