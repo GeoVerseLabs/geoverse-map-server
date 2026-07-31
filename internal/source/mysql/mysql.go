@@ -341,6 +341,16 @@ func boundWKT(bound orb.Bound) string {
 		strconv.FormatFloat(bound.Min[1], 'f', -1, 64) + "))"
 }
 
+func clampWGS84Bound(bound orb.Bound) orb.Bound {
+	const maxMercatorLatitude = 85.05112877980659
+	const antimeridianEpsilon = 1e-9
+	bound.Min[0] = max(-180+antimeridianEpsilon, bound.Min[0])
+	bound.Max[0] = min(180-antimeridianEpsilon, bound.Max[0])
+	bound.Min[1] = max(-maxMercatorLatitude, bound.Min[1])
+	bound.Max[1] = min(maxMercatorLatitude, bound.Max[1])
+	return bound
+}
+
 func (s *Source) selectList() string {
 	var builder strings.Builder
 	builder.WriteString("ST_AsGeoJSON(")
@@ -438,11 +448,26 @@ func normalizeValue(value interface{}) interface{} {
 // Tile implements source.TileSource.
 func (s *Source) Tile(ctx context.Context, z, x, y uint32) ([]byte, error) {
 	tile := maptile.New(x, y, maptile.Zoom(z))
-	where := fmt.Sprintf(
-		"t.%s IS NOT NULL AND MBRIntersects(t.%s, %s)",
-		quoteIdent(s.geomCol), quoteIdent(s.geomCol), s.bboxGeometry())
+	// maptile's selection buffer intentionally extends beyond the tile. At
+	// the antimeridian this can exceed the legal EPSG:4326 longitude range,
+	// which MySQL 8 rejects before MBRIntersects can run (notably z0-z2 for
+	// data in the easternmost tile). Clamp only the database query envelope;
+	// the MVT encoder still clips against the original tile.
+	queryBound := clampWGS84Bound(tile.Bound(0.1))
+	where := fmt.Sprintf("t.%s IS NOT NULL", quoteIdent(s.geomCol))
+	var args []interface{}
+	// MySQL interprets geographic polygons wider than a hemisphere as their
+	// smaller spherical complement. At z0/z1 the buffered tile is wider than
+	// 180 degrees, so an MBR predicate would incorrectly exclude ordinary
+	// features. The existing candidate cap remains the safety guard there.
+	if queryBound.Max[0]-queryBound.Min[0] < 180 {
+		where += fmt.Sprintf(
+			" AND MBRIntersects(t.%s, %s)",
+			quoteIdent(s.geomCol), s.bboxGeometry())
+		args = append(args, boundWKT(queryBound))
+	}
 	features, err := s.queryFeatures(
-		ctx, where, []interface{}{boundWKT(tile.Bound(0.1))}, maxTileFeatures+1, 0)
+		ctx, where, args, maxTileFeatures+1, 0)
 	if err != nil {
 		return nil, err
 	}
