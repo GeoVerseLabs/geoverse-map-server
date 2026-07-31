@@ -20,17 +20,18 @@ import (
 
 // Source serves one PostGIS table.
 type Source struct {
-	name    string
-	pool    *pgxpool.Pool
-	schema  string
-	table   string
-	geomCol string
-	idCol   string
-	srid    int
-	fields  []string
-	extent  int
-	buffer  int
-	info    source.TileInfo
+	name     string
+	pool     *pgxpool.Pool
+	schema   string
+	table    string
+	geomCol  string
+	idCol    string
+	mvtIDCol string
+	srid     int
+	fields   []string
+	extent   int
+	buffer   int
+	info     source.TileInfo
 }
 
 var (
@@ -51,7 +52,6 @@ func New(ctx context.Context, cfg config.Source) (*Source, error) {
 		geomCol: firstNonEmpty(cfg.GeometryColumn, "geom"),
 		idCol:   cfg.IDColumn,
 		srid:    cfg.SRID,
-		fields:  cfg.Fields,
 		extent:  4096,
 		buffer:  64,
 	}
@@ -106,29 +106,37 @@ func (s *Source) introspect(ctx context.Context, cfg config.Source) error {
 			s.srid = 4326
 		}
 	}
-	// Discover attribute columns if not configured.
-	if len(s.fields) == 0 {
-		rows, err := s.pool.Query(ctx,
-			`SELECT column_name, udt_name FROM information_schema.columns
-			 WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`,
-			s.schema, s.table)
-		if err != nil {
-			return fmt.Errorf("introspect columns: %w", err)
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var col, typ string
-			if err := rows.Scan(&col, &typ); err != nil {
-				return err
-			}
-			if col == s.geomCol || typ == "geometry" || typ == "geography" {
-				continue
-			}
-			s.fields = append(s.fields, col)
-		}
-		if err := rows.Err(); err != nil {
+	rows, err := s.pool.Query(ctx,
+		`SELECT column_name, udt_name FROM information_schema.columns
+		 WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position`,
+		s.schema, s.table)
+	if err != nil {
+		return fmt.Errorf("introspect columns: %w", err)
+	}
+	columnTypes := map[string]string{}
+	var discoveredFields []string
+	geometryFound := false
+	for rows.Next() {
+		var col, typ string
+		if err := rows.Scan(&col, &typ); err != nil {
+			rows.Close()
 			return err
 		}
+		columnTypes[col] = typ
+		if col == s.geomCol && (typ == "geometry" || typ == "geography") {
+			geometryFound = true
+		}
+		if col != s.geomCol && typ != "geometry" && typ != "geography" {
+			discoveredFields = append(discoveredFields, col)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if !geometryFound {
+		return fmt.Errorf("geometry column %q was not found in %s", s.geomCol, s.relation())
 	}
 	// Discover a primary key for feature ids if not configured.
 	if s.idCol == "" {
@@ -137,6 +145,37 @@ func (s *Source) introspect(ctx context.Context, cfg config.Source) error {
 			JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
 			WHERE i.indrelid = ($1::text)::regclass AND i.indisprimary
 			LIMIT 1`, s.relation()).Scan(&s.idCol)
+	}
+	if s.idCol != "" {
+		idType, ok := columnTypes[s.idCol]
+		if !ok {
+			return fmt.Errorf("id column %q was not found in %s", s.idCol, s.relation())
+		}
+		// PostGIS accepts only int2/int4/int8 for the optional MVT feature
+		// id argument. UUID/text keys remain valid OGC feature IDs and MVT
+		// properties, but must not be passed as feature_id_name.
+		if isPostgresInteger(idType) {
+			s.mvtIDCol = s.idCol
+		}
+	}
+	if len(cfg.Fields) == 0 {
+		s.fields = discoveredFields
+	} else {
+		seen := map[string]bool{}
+		for _, field := range cfg.Fields {
+			typ, ok := columnTypes[field]
+			if !ok {
+				return fmt.Errorf("field %q was not found in %s", field, s.relation())
+			}
+			if field == s.geomCol || typ == "geometry" || typ == "geography" || seen[field] {
+				continue
+			}
+			s.fields = append(s.fields, field)
+			seen[field] = true
+		}
+		if s.idCol != "" && !seen[s.idCol] {
+			s.fields = append(s.fields, s.idCol)
+		}
 	}
 
 	info := source.TileInfo{
@@ -158,11 +197,16 @@ func (s *Source) introspect(ctx context.Context, cfg config.Source) error {
 	}
 	// Cheap extent estimate; fall back to world bounds on empty stats.
 	var b [4]float64
-	err := s.pool.QueryRow(ctx, fmt.Sprintf(
+	err = s.pool.QueryRow(ctx, fmt.Sprintf(
 		`SELECT ST_XMin(e), ST_YMin(e), ST_XMax(e), ST_YMax(e)
 		 FROM (SELECT ST_Transform(ST_SetSRID(ST_EstimatedExtent($1,$2,$3),%d),4326) AS e) q`,
 		s.srid), s.schema, s.table, s.geomCol).Scan(&b[0], &b[1], &b[2], &b[3])
 	if err == nil {
+		const maxMercatorLatitude = 85.05112877980659
+		b[0] = max(-180, b[0])
+		b[1] = max(-maxMercatorLatitude, b[1])
+		b[2] = min(180, b[2])
+		b[3] = min(maxMercatorLatitude, b[3])
 		info.Bounds = b
 	}
 	info.Center = [3]float64{
@@ -179,6 +223,15 @@ func (s *Source) introspect(ctx context.Context, cfg config.Source) error {
 	return nil
 }
 
+func isPostgresInteger(udtName string) bool {
+	switch udtName {
+	case "int2", "int4", "int8":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Source) selectList(prefix string) string {
 	var sb strings.Builder
 	for _, f := range s.fields {
@@ -191,23 +244,47 @@ func (s *Source) selectList(prefix string) string {
 
 // Tile implements source.TileSource.
 func (s *Source) Tile(ctx context.Context, z, x, y uint32) ([]byte, error) {
-	geomExpr := fmt.Sprintf("ST_Transform(t.%s, 3857)", quoteIdent(s.geomCol))
+	// Clamp the buffered envelope to the global Web Mercator domain before
+	// transforming it. Otherwise PROJ wraps x > 20037508 to the opposite
+	// hemisphere, so eastern z1/z2 requests query western geometries.
+	expandedBounds := `ST_Intersection(
+		ST_Expand(
+			tile.tile_bounds,
+			(ST_XMax(tile.tile_bounds) - ST_XMin(tile.tile_bounds)) * 0.03125
+		),
+		ST_MakeEnvelope(
+			-20037508.342789244, -20037508.342789244,
+			 20037508.342789244,  20037508.342789244,
+			3857
+		)
+	)`
+	sourceBounds := fmt.Sprintf("ST_Transform(%s, %d)", expandedBounds, s.srid)
+	geomExpr := fmt.Sprintf(
+		"ST_Transform(ST_Intersection(t.%s, bounds.source_bounds), 3857)",
+		quoteIdent(s.geomCol))
 	if s.srid == 3857 {
-		geomExpr = "t." + quoteIdent(s.geomCol)
+		sourceBounds = expandedBounds
+		geomExpr = fmt.Sprintf(
+			"ST_Intersection(t.%s, bounds.source_bounds)",
+			quoteIdent(s.geomCol))
 	}
 	mvtArgs := fmt.Sprintf("mvtgeom.*, '%s', %d, 'geom'", s.name, s.extent)
-	if s.idCol != "" {
-		mvtArgs += fmt.Sprintf(", %s", quoteLiteral(s.idCol))
+	if s.mvtIDCol != "" {
+		mvtArgs += fmt.Sprintf(", %s", quoteLiteral(s.mvtIDCol))
 	}
 	sql := fmt.Sprintf(`
-		WITH mvtgeom AS (
-			SELECT ST_AsMVTGeom(%s, ST_TileEnvelope($1,$2,$3), %d, %d, true) AS geom%s
-			FROM %s t
-			WHERE t.%s && ST_Transform(ST_TileEnvelope($1,$2,$3, margin => 0.03125), %d)
+		WITH tile AS (
+			SELECT ST_TileEnvelope($1,$2,$3) AS tile_bounds
+		), bounds AS (
+			SELECT tile.tile_bounds, %s AS source_bounds FROM tile
+		), mvtgeom AS (
+			SELECT ST_AsMVTGeom(%s, bounds.tile_bounds, %d, %d, true) AS geom%s
+			FROM %s t CROSS JOIN bounds
+			WHERE t.%s && bounds.source_bounds
 		)
 		SELECT ST_AsMVT(%s) FROM mvtgeom WHERE geom IS NOT NULL`,
-		geomExpr, s.extent, s.buffer, s.selectList("t."),
-		s.relation(), quoteIdent(s.geomCol), s.srid,
+		sourceBounds, geomExpr, s.extent, s.buffer, s.selectList("t."),
+		s.relation(), quoteIdent(s.geomCol),
 		mvtArgs)
 	var data []byte
 	if err := s.pool.QueryRow(ctx, sql, z, x, y).Scan(&data); err != nil {
@@ -302,6 +379,9 @@ func normalizeJSON(v interface{}) interface{} {
 	switch t := v.(type) {
 	case []byte:
 		return string(t)
+	case [16]byte:
+		return fmt.Sprintf("%x-%x-%x-%x-%x",
+			t[0:4], t[4:6], t[6:8], t[8:10], t[10:16])
 	case json.RawMessage:
 		return string(t)
 	default:
