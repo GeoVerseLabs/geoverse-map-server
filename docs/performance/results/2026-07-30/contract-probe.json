@@ -1,0 +1,219 @@
+{
+  "base": "http://127.0.0.1:8080",
+  "checkedAt": "2026-07-30T07:29:01Z",
+  "passed": 30,
+  "failed": 0,
+  "durationMs": 20.6064,
+  "checks": [
+    {
+      "name": "landing page",
+      "pass": true,
+      "status": 200,
+      "durationMs": 2.6268,
+      "detail": "bytes=1088"
+    },
+    {
+      "name": "conformance declaration",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5597,
+      "detail": "bytes=204"
+    },
+    {
+      "name": "deep health checks four sources",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5162,
+      "detail": "bytes=123"
+    },
+    {
+      "name": "readiness probe",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5316,
+      "detail": "bytes=96"
+    },
+    {
+      "name": "catalog distributes four layers",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5264,
+      "detail": "bytes=1318"
+    },
+    {
+      "name": "forwarded public links",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5283,
+      "detail": "bytes=1366"
+    },
+    {
+      "name": "TileJSON 3.0",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.52,
+      "detail": "bytes=368"
+    },
+    {
+      "name": "XYZ MVT uncompressed",
+      "pass": true,
+      "status": 200,
+      "durationMs": 1.1725,
+      "detail": "bytes=95 etag=\"226e8ff80ac876d4\" encoding=\"\""
+    },
+    {
+      "name": "XYZ MVT gzip",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5432,
+      "detail": "bytes=118 etag=\"226e8ff80ac876d4\" encoding=\"gzip\""
+    },
+    {
+      "name": "WMTS REST tile equals XYZ",
+      "pass": true,
+      "status": 200,
+      "durationMs": 1.0061,
+      "detail": "xyzBytes=95 wmtsBytes=95"
+    },
+    {
+      "name": "WMTS capabilities",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5053,
+      "detail": "bytes=10918"
+    },
+    {
+      "name": "ETag conditional request",
+      "pass": true,
+      "status": 304,
+      "durationMs": 0.5134,
+      "detail": "etag=\"226e8ff80ac876d4\" bytes=0"
+    },
+    {
+      "name": "out-of-zoom tile is empty",
+      "pass": true,
+      "status": 204,
+      "durationMs": 0,
+      "detail": "want=204 got=204 bytes=0"
+    },
+    {
+      "name": "invalid tile coordinate rejected",
+      "pass": true,
+      "status": 400,
+      "durationMs": 0.5219,
+      "detail": "want=400 got=400 bytes=53"
+    },
+    {
+      "name": "unknown tile layer rejected",
+      "pass": true,
+      "status": 404,
+      "durationMs": 0.5323,
+      "detail": "want=404 got=404 bytes=62"
+    },
+    {
+      "name": "OGC collections list",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5459,
+      "detail": "bytes=2211"
+    },
+    {
+      "name": "OGC bbox feature query",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5267,
+      "detail": "bytes=377"
+    },
+    {
+      "name": "OGC single feature",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0,
+      "detail": "bytes=160"
+    },
+    {
+      "name": "invalid OGC bbox rejected",
+      "pass": true,
+      "status": 400,
+      "durationMs": 0.5253,
+      "detail": "want=400 got=400 bytes=59"
+    },
+    {
+      "name": "unknown OGC feature rejected",
+      "pass": true,
+      "status": 404,
+      "durationMs": 0.5148,
+      "detail": "want=404 got=404 bytes=61"
+    },
+    {
+      "name": "algorithm catalog",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5309,
+      "detail": "bytes=4231"
+    },
+    {
+      "name": "algorithm shortest_path",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5267,
+      "detail": "bytes=350"
+    },
+    {
+      "name": "algorithm isochrone",
+      "pass": true,
+      "status": 200,
+      "durationMs": 1.5722,
+      "detail": "bytes=1875"
+    },
+    {
+      "name": "algorithm map_match",
+      "pass": true,
+      "status": 200,
+      "durationMs": 1.0461,
+      "detail": "bytes=671"
+    },
+    {
+      "name": "algorithm dbscan",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.527,
+      "detail": "bytes=788"
+    },
+    {
+      "name": "Prometheus metrics",
+      "pass": true,
+      "status": 200,
+      "durationMs": 1.0428,
+      "detail": "bytes=3195"
+    },
+    {
+      "name": "admin runtime stats",
+      "pass": true,
+      "status": 200,
+      "durationMs": 0.5224,
+      "detail": "bytes=793"
+    },
+    {
+      "name": "MCP disabled on current instance",
+      "pass": true,
+      "status": 404,
+      "durationMs": 0.521,
+      "detail": "want=404 got=404 bytes=19"
+    },
+    {
+      "name": "CORS preflight",
+      "pass": true,
+      "status": 204,
+      "durationMs": 0,
+      "detail": "allowMethods=\"GET, HEAD, POST, DELETE, OPTIONS\""
+    },
+    {
+      "name": "unsupported method rejected",
+      "pass": true,
+      "status": 405,
+      "durationMs": 0.5466,
+      "detail": "want=405 got=405 bytes=19"
+    }
+  ]
+}

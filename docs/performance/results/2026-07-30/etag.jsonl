@@ -1,0 +1,1 @@
+{"scenario":"etag-304-c32","method":"GET","concurrency":32,"requestedWindow":"3s","elapsedSeconds":3.0096095,"requests":12264,"rps":4074.9472647531184,"successRate":1,"transportErrors":0,"statusCounts":{"304":12264},"bytes":0,"bytesPerSecond":0,"latencyMs":{"min":0,"mean":7.832539408023516,"p50":7.62455,"p95":9.294175000000001,"p99":10.769840000000002,"max":71.0632}}
