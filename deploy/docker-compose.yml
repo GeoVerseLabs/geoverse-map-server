@@ -8,10 +8,13 @@
 #   ./config.yaml   your service config (start from ../config.example.yaml)
 #   ./data/         your .mbtiles / .geojson / .gpkg files
 #
-# The PostGIS service is behind a profile and off by default: v0.1's target
-# is static, read-only publishing, and a database that nothing references
-# should not be part of the minimal deployment. Enable it with
-# `docker compose --profile postgis up -d`.
+# Database services are behind profiles and off by default: v0.1's target is
+# static, read-only publishing, and an unused database should not be part of
+# the minimal deployment. Enable a local validation database explicitly:
+#   docker compose --profile postgis up -d postgis
+#   docker compose --profile mysql up -d mysql
+
+name: geoverse-map-server
 
 services:
   map-server:
@@ -68,7 +71,10 @@ services:
     environment:
       POSTGRES_DB: ${PG_DB:-gis}
       POSTGRES_USER: ${PG_USER:-geoverse}
-      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
+      # Keep interpolation optional so the default static-only profile can be
+      # parsed without database secrets. The image itself rejects an empty
+      # password when this profile is explicitly started.
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -77,6 +83,36 @@ services:
       timeout: 5s
       retries: 5
 
+  # Optional: MySQL 8 spatial table used by examples/config.multisource.yaml.
+  # The init script creates a read-only application user and three point
+  # features with an SRID-constrained spatial index.
+  mysql:
+    profiles: ["mysql"]
+    image: mysql:8.4
+    container_name: geoverse-mysql
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_BIND_ADDR:-127.0.0.1}:${MYSQL_PORT:-3308}:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DB:-geoverse_demo}
+      MYSQL_USER: ${MYSQL_USER:-geoverse_reader}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 10
+
 volumes:
   tile-cache:
   pgdata:
+  mysql-data:

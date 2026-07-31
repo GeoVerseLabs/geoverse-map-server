@@ -18,7 +18,7 @@ cache:
     ttl: 24h
     max_size_mb: 512   # 超限时后台清理，按最旧优先淘汰；0 = 不限制
 
-auth:                  # 简单 API Key 鉴权（/health 豁免）
+auth:                  # 简单 API Key 鉴权（/health、/readyz 豁免）
   enabled: false
   api_keys: []         # 也可用环境变量 GEOVERSE_API_KEYS=key1,key2 追加
   # 客户端可用三种方式携带 key：
@@ -30,14 +30,31 @@ mcp:                   # Model Context Protocol 端点（Streamable HTTP）
 
 sources:
   # ── 数据库：PostGIS 动态矢量切片（需要 PostGIS >= 3.0）──────────
-  # - name: roads
+  # 与 WebUI「填入本地 PostgreSQL 示例」一致；请按本机库名/账号/表名修改。
+  # - name: local-postgis
   #   type: postgis
-  #   dsn: postgres://user:password@localhost:5432/gis
-  #   table: public.roads
+  #   title: 本地 PostGIS 示例
+  #   dsn: postgres://postgres:postgres@127.0.0.1:5432/postgres
+  #   table: public.features
   #   geometry_column: geom      # 默认 geom
-  #   id_column: gid             # 缺省时自动探测主键
+  #   id_column: id              # 缺省时自动探测主键
   #   srid: 4326                 # 缺省时从 geometry_columns 探测
   #   fields: [name, class]      # 缺省时导出全部非几何列
+  #   min_zoom: 0
+  #   max_zoom: 22
+
+  # ── 数据库：MySQL 8 / MariaDB 空间表（动态 MVT + Features）────
+  # WebUI「填入本地 MySQL / MariaDB 示例」对应 deploy compose 的 mysql profile：
+  # 宿主 3308 → 容器 3306，库 geoverse_demo，表 warehouse，几何列 location。
+  # - name: local-mysql
+  #   type: mysql
+  #   title: 本地 MySQL 8 空间表示例
+  #   dsn: mysql://geoverse_reader:geoverse_demo@127.0.0.1:3308/geoverse_demo
+  #   table: geoverse_demo.warehouse
+  #   geometry_column: location # 默认 geom
+  #   id_column: id              # 缺省时自动探测主键
+  #   srid: 4326                 # 缺省时从首个非空几何探测
+  #   fields: [name, address]    # 缺省时导出全部非几何列
   #   min_zoom: 0
   #   max_zoom: 22
 
@@ -45,6 +62,14 @@ sources:
   # - name: basemap
   #   type: mbtiles
   #   path: ./data/basemap.mbtiles
+
+  # ── 静态文件：PMTiles v3（推荐的大型只读归档）────────────────
+  # - name: vector_basemap
+  #   type: pmtiles
+  #   path: ./data/vector-basemap.pmtiles
+  #   # 同时提供：
+  #   # /tiles/vector_basemap/{z}/{x}/{y}.pbf  服务端解包切片
+  #   # /archives/vector_basemap.pmtiles       浏览器 Range/206 直读
 
   # ── 静态文件：GeoJSON（启动时载入内存，动态切片 + 要素服务）────
   - name: cities
@@ -95,3 +120,8 @@ networks:
 # POST /algorithms/{name} 执行；开启 MCP 后同时暴露为 algo_* 工具
 algorithms:
   enabled: true
+
+# 启动后访问 http://localhost:8080/admin/ 可打开内置控制台的数据源、服务目录与
+# 运行统计三视图。
+# WebUI 会先真实探活，再原子写回本文件并热加载数据源；若配置以只读卷挂载，
+# 页面自动降级为只读。对外部署务必开启 auth 或由反向代理限制 /admin/*。

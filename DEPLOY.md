@@ -48,11 +48,17 @@ curl -s localhost:8080/readyz | jq
 **密钥生成**：`openssl rand -hex 32`。多个密钥用逗号分隔，可用于灰度轮换
 （先加新的、客户端切完再删旧的）。
 
-**PostGIS**（v0.2 范畴，默认关闭）：
+**数据库 profile**（动态服务验证，默认关闭）：
 
 ```bash
-docker compose --profile postgis up -d
+docker compose --profile postgis up -d postgis
+docker compose --profile mysql up -d mysql
 ```
+
+`mysql` profile 使用宿主 `127.0.0.1:3308`，并通过 `mysql-init/` 创建 SRID 4326
+空间点表；凭据来自 `.env`。它用于开发与验收，不会进入最小静态部署。若本机已有
+GeoVerse Live 的 `gv-postgis`，可直接使用 `examples/config.multisource.yaml`
+连接该实例，无需再启动本 compose 的 PostGIS。
 
 ### 构建镜像
 

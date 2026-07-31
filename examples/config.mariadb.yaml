@@ -1,0 +1,41 @@
+# mariadb-gis 本地空间数据源示例
+#
+# 已验证环境：
+#   image: mariadb:11.8
+#   container: mariadb-gis
+#   port: 127.0.0.1:3307 -> 3306
+#   database/table: geometry_test.warehouse
+#
+# root/root 只匹配本地开发容器。生产环境请创建仅对目标表有 SELECT 权限的
+# 专用账号，并通过受限文件权限或部署环境注入配置。
+
+server:
+  host: 127.0.0.1
+  port: 18080
+  cors: true
+  timeout: 30s
+
+cache:
+  enabled: true
+  max_entries: 1000
+  ttl: 5m
+
+auth:
+  enabled: false
+
+sources:
+  - name: warehouses
+    type: mysql
+    title: MariaDB 仓库点位
+    description: geometry_test.warehouse 的实时空间表分发示例
+    dsn: mysql://root:root@127.0.0.1:3307/geometry_test
+    table: geometry_test.warehouse
+    geometry_column: location
+    id_column: id
+    srid: 4326
+    fields: [name, address]
+    min_zoom: 0
+    max_zoom: 18
+
+algorithms:
+  enabled: true

@@ -1,0 +1,81 @@
+# Docker 多数据源验收示例
+#
+# 前置条件：
+#   1. GeoVerse Live 的 gv-postgis 已运行在 127.0.0.1:5432
+#   2. cd deploy
+#   3. 配好 .env 后运行 docker compose --profile mysql up -d mysql
+#   4. 回到仓库根运行：
+#      geoverse -config examples/config.multisource.yaml
+#
+# 本配置只读取现有 gv-postgis 业务表；MySQL 使用 deploy/mysql-init 创建的
+# 专用演示库和只读账号。默认凭据仅用于本机验证，不适合生产环境。
+
+server:
+  host: 127.0.0.1
+  port: 18080
+  cors: true
+  timeout: 30s
+
+cache:
+  enabled: true
+  max_entries: 1000
+  ttl: 5m
+
+auth:
+  enabled: false
+
+sources:
+  - name: live-features
+    type: postgis
+    title: GeoVerse Live 要素
+    description: 复用 gv-postgis 的 geo.feature 空间表
+    dsn: postgres://geoverse:geoverse@127.0.0.1:5432/geoverse
+    table: geo.feature
+    geometry_column: geom
+    id_column: project_id
+    srid: 4326
+    fields: [project_id, layer_id, feature_type]
+    min_zoom: 0
+    max_zoom: 18
+
+  - name: mysql-warehouses
+    type: mysql
+    title: MySQL 8 仓库点位
+    description: geoverse-mysql 容器中的动态空间表
+    dsn: mysql://geoverse_reader:geoverse_demo@127.0.0.1:3308/geoverse_demo
+    table: geoverse_demo.warehouse
+    geometry_column: location
+    id_column: id
+    srid: 4326
+    fields: [name, address, capacity]
+    min_zoom: 0
+    max_zoom: 18
+
+  - name: cities
+    type: geojson
+    title: 中国主要城市
+    description: 仓库内置 GeoJSON 静态资源
+    path: ./examples/data/cities.geojson
+    max_zoom: 14
+
+  - name: countries
+    type: geojson
+    title: 世界国家边界
+    description: Natural Earth 1:110m 静态资源
+    path: ./examples/data/ne_110m_admin_0_countries.geojson
+    max_zoom: 8
+
+  - name: campus_paths
+    type: geojson
+    title: 校园步行路网
+    description: 仓库内置算法与切片共用静态资源
+    path: ./examples/data/campus_paths.geojson
+    max_zoom: 18
+
+networks:
+  - name: campus
+    source: campus_paths
+    default_speed_kmh: 5
+
+algorithms:
+  enabled: true
