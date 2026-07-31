@@ -218,6 +218,8 @@ sources:
     layer: parcels
 ```
 
+PostGIS 的 `id_column` 可配置 UUID/text 主键用于 OGC Features 单要素寻址，并作为普通 MVT 属性输出；只有 `smallint`/`integer`/`bigint` 列会写入 MVT 原生 feature id。动态瓦片查询会先把带 buffer 的 Web Mercator envelope 裁到全球合法范围，再变换到源 SRID，避免低 zoom 边缘瓦片跨反经线后查询到相反半球。
+
 ## 7. 代码布局
 
 ```

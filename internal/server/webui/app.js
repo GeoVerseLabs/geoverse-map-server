@@ -645,9 +645,9 @@ $("#local-db-example").addEventListener("click", () => {
     db_password: mysql ? "geoverse_demo" : "geoverse",
     table: mysql ? "geoverse_demo.warehouse" : "geo.feature",
     geometry_column: mysql ? "location" : "geom",
-    id_column: mysql ? "id" : "project_id",
+    id_column: "id",
     srid: "4326",
-    fields: mysql ? "name, address, capacity" : "project_id, layer_id, feature_type",
+    fields: mysql ? "name, address, capacity" : "id, layer_id, feature_type",
   };
   Object.entries(example).forEach(([name, value]) => {
     if (form.elements[name]) form.elements[name].value = value;

@@ -37,7 +37,7 @@ sources:
   #   dsn: postgres://postgres:postgres@127.0.0.1:5432/postgres
   #   table: public.features
   #   geometry_column: geom      # 默认 geom
-  #   id_column: id              # 缺省时自动探测主键
+  #   id_column: id              # 缺省时自动探测主键；UUID/text 可作 OGC ID，MVT feature id 仅使用整数列
   #   srid: 4326                 # 缺省时从 geometry_columns 探测
   #   fields: [name, class]      # 缺省时导出全部非几何列
   #   min_zoom: 0

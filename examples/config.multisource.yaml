@@ -32,9 +32,10 @@ sources:
     dsn: postgres://geoverse:geoverse@127.0.0.1:5432/geoverse
     table: geo.feature
     geometry_column: geom
-    id_column: project_id
+    # UUID 主键用于 OGC item ID 和 MVT 属性；Serve 仅把整数主键写入 MVT feature id。
+    id_column: id
     srid: 4326
-    fields: [project_id, layer_id, feature_type]
+    fields: [id, layer_id, feature_type]
     min_zoom: 0
     max_zoom: 18
 
