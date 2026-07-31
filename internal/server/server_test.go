@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -9,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,6 +20,49 @@ import (
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
 	"github.com/paulmach/orb/encoding/mvt"
 )
+
+func testPMTiles(t *testing.T) string {
+	t.Helper()
+	tile := []byte{0x1a, 0x00}
+	var dir []byte
+	for _, value := range []uint64{1, 4, 1, uint64(len(tile)), 1} {
+		var buf [binary.MaxVarintLen64]byte
+		n := binary.PutUvarint(buf[:], value)
+		dir = append(dir, buf[:n]...)
+	}
+	metadata := []byte(`{"name":"Tiny","vector_layers":[{"id":"roads","fields":{}}]}`)
+	rootOffset := uint64(127)
+	metadataOffset := rootOffset + uint64(len(dir))
+	tileOffset := metadataOffset + uint64(len(metadata))
+	header := make([]byte, 127)
+	copy(header[:7], "PMTiles")
+	header[7] = 3
+	put64 := func(at int, value uint64) { binary.LittleEndian.PutUint64(header[at:at+8], value) }
+	put32e7 := func(at int, value float64) {
+		binary.LittleEndian.PutUint32(header[at:at+4], uint32(int32(value*1e7)))
+	}
+	put64(8, rootOffset)
+	put64(16, uint64(len(dir)))
+	put64(24, metadataOffset)
+	put64(32, uint64(len(metadata)))
+	put64(40, tileOffset)
+	put64(56, tileOffset)
+	put64(64, uint64(len(tile)))
+	put64(72, 1)
+	put64(80, 1)
+	put64(88, 1)
+	header[96], header[97], header[98], header[99] = 1, 1, 1, 1
+	header[100], header[101], header[118] = 1, 1, 1
+	put32e7(102, -180)
+	put32e7(106, -85)
+	put32e7(110, 180)
+	put32e7(114, 85)
+	path := filepath.Join(t.TempDir(), "tiny.pmtiles")
+	if err := os.WriteFile(path, append(append(append(header, dir...), metadata...), tile...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 const testGeoJSON = `{
   "type": "FeatureCollection",
@@ -258,5 +304,157 @@ func TestCatalog(t *testing.T) {
 	l := layers[0].(map[string]interface{})
 	if l["name"] != "cities" || !strings.Contains(l["tiles"].(string), "{z}/{x}/{y}.pbf") {
 		t.Errorf("catalog entry: %v", l)
+	}
+}
+
+func TestPMTilesXYZAndRangeArchive(t *testing.T) {
+	cfg := config.Default()
+	cfg.Sources = []config.Source{{Name: "archive", Type: "pmtiles", Path: testPMTiles(t)}}
+	reg, err := registry.Build(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reg.Close)
+	store, err := cache.NewTiered(cfg.Cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ts := httptest.NewServer(New(cfg, reg, store, log).Handler())
+	t.Cleanup(ts.Close)
+
+	tileResp, err := http.Get(ts.URL + "/tiles/archive/1/1/0.pbf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tile, _ := io.ReadAll(tileResp.Body)
+	tileResp.Body.Close()
+	if tileResp.StatusCode != http.StatusOK || !bytes.Equal(tile, []byte{0x1a, 0x00}) {
+		t.Fatalf("XYZ tile: status=%d body=%x", tileResp.StatusCode, tile)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/archives/archive.pmtiles", nil)
+	req.Header.Set("Range", "bytes=0-6")
+	rangeResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rangeBody, _ := io.ReadAll(rangeResp.Body)
+	rangeResp.Body.Close()
+	if rangeResp.StatusCode != http.StatusPartialContent || string(rangeBody) != "PMTiles" {
+		t.Fatalf("range: status=%d body=%q", rangeResp.StatusCode, rangeBody)
+	}
+	if rangeResp.Header.Get("Content-Type") != "application/vnd.pmtiles" {
+		t.Errorf("archive content type = %q", rangeResp.Header.Get("Content-Type"))
+	}
+	doc := getJSON(t, ts.URL+"/catalog", http.StatusOK)
+	entry := doc["layers"].([]interface{})[0].(map[string]interface{})
+	if !strings.HasSuffix(entry["archive"].(string), "/archives/archive.pmtiles") {
+		t.Fatalf("catalog archive = %v", entry["archive"])
+	}
+}
+
+func TestManagedWebUIAndSourceLifecycle(t *testing.T) {
+	dir := t.TempDir()
+	firstPath := filepath.Join(dir, "first.geojson")
+	secondPath := filepath.Join(dir, "second.geojson")
+	for _, path := range []string{firstPath, secondPath} {
+		if err := os.WriteFile(path, []byte(testGeoJSON), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	configPath := filepath.Join(dir, "config.yaml")
+	body := "server:\n  port: 8080\nsources:\n  - name: first\n    type: geojson\n    path: " + firstPath + "\n"
+	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry.Build(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reg.Close)
+	store, err := cache.NewTiered(cfg.Cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.Close)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ts := httptest.NewServer(NewManaged(cfg, configPath, reg, store, log).Handler())
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/admin/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !bytes.Contains(html, []byte("数据源控制台")) {
+		t.Fatalf("WebUI: status=%d", resp.StatusCode)
+	}
+	for _, marker := range [][]byte{
+		[]byte(`data-view="catalog"`),
+		[]byte(`id="view-catalog"`),
+		[]byte(`id="view-stats"`),
+	} {
+		if !bytes.Contains(html, marker) {
+			t.Errorf("WebUI missing %q", marker)
+		}
+	}
+	appResp, err := http.Get(ts.URL + "/admin/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	appJS, _ := io.ReadAll(appResp.Body)
+	appResp.Body.Close()
+	for _, marker := range [][]byte{[]byte(`api("/catalog")`), []byte(`api("/admin/stats")`)} {
+		if !bytes.Contains(appJS, marker) {
+			t.Errorf("WebUI app missing %q", marker)
+		}
+	}
+
+	payload := []byte(`{"name":"second","type":"geojson","path":` + strconv.Quote(secondPath) + `,"title":"Second"}`)
+	resp, err = http.Post(ts.URL+"/admin/sources", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save source status = %d", resp.StatusCode)
+	}
+	catalog := getJSON(t, ts.URL+"/catalog", http.StatusOK)
+	if len(catalog["layers"].([]interface{})) != 2 {
+		t.Fatalf("hot-loaded catalog: %v", catalog)
+	}
+	persisted, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted.Sources) != 2 {
+		t.Fatalf("persisted sources = %+v", persisted.Sources)
+	}
+
+	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/admin/sources/second", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete source status = %d", resp.StatusCode)
+	}
+	if _, ok := reg.Get("second"); ok {
+		t.Fatal("deleted source is still visible in registry")
+	}
+}
+
+func TestRedactDSN(t *testing.T) {
+	got := redactDSN("postgres://reader:secret@localhost:5432/gis?sslmode=disable")
+	if strings.Contains(got, "secret") || !strings.Contains(got, "reader") {
+		t.Fatalf("redacted DSN = %q", got)
 	}
 }

@@ -72,6 +72,10 @@ func TestStats(t *testing.T) {
 	if sources["total"].(float64) != 1 {
 		t.Errorf("sources.total = %v, want 1", sources["total"])
 	}
+	byType := sources["byType"].(map[string]interface{})
+	if byType["geojson"].(float64) != 1 {
+		t.Errorf("sources.byType = %v, want geojson=1", byType)
+	}
 	reqs := doc["requests"].(map[string]interface{})
 	if reqs["total"].(float64) < 3 {
 		t.Errorf("requests.total = %v, want >= 3", reqs["total"])
@@ -84,8 +88,8 @@ func TestStats(t *testing.T) {
 	}
 }
 
-// The management UI renders /admin/stats verbatim, so a credential leaking
-// into it would land straight in an operator's browser (and screenshots).
+// The management UI renders /admin/stats, so a credential leaking into it
+// would land straight in an operator's browser (and screenshots).
 func TestStatsLeaksNoCredentials(t *testing.T) {
 	ts := authedServer(t)
 	req, _ := http.NewRequest("GET", ts.URL+"/admin/stats", nil)

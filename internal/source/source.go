@@ -75,6 +75,14 @@ type TileSource interface {
 	TileInfo() TileInfo
 }
 
+// ArchiveSource exposes the immutable archive behind a tile source. The HTTP
+// layer opens Path for each request and delegates byte-range semantics to
+// http.ServeContent; callers never receive an already-seeked shared file.
+type ArchiveSource interface {
+	ArchivePath() string
+	ArchiveContentType() string
+}
+
 // FeatureQuery holds OGC API - Features query parameters.
 type FeatureQuery struct {
 	// BBox in WGS84 (west, south, east, north); nil = no filter.

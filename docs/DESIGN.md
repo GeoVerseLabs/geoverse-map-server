@@ -7,8 +7,8 @@
 - 单一静态二进制（纯 Go、无 CGO），`scp` 上去就能跑，也可 Docker 一键部署
 - 支持**矢量切片**（Mapbox Vector Tile / MVT）
 - 支持 **OGC 常用格式与接口**：OGC API - Features（GeoJSON）、WMTS、GeoPackage、MVT（OGC 社区标准）
-- 支持**多数据源**并做统一转换：数据库（PostGIS）与静态文件（MBTiles / GeoJSON / GeoPackage）
-- 内置缓存、CORS、健康检查，配置文件驱动，零外部运行时依赖
+- 支持**多数据源**并做统一转换：数据库（PostGIS / MySQL 8 / MariaDB）与静态文件（PMTiles / MBTiles / GeoJSON / GeoPackage）
+- 内置缓存、CORS、健康检查与数据源/服务目录/运行统计 WebUI，配置文件驱动，零外部运行时依赖
 
 ## 2. 总体架构
 
@@ -32,11 +32,11 @@
                     ┌────────────────────────────────────────────┐
                     │            Source Registry（统一抽象）      │
                     │   TileSource / FeatureSource 两个接口       │
-                    └──┬──────────┬──────────┬──────────┬────────┘
-                       ▼          ▼          ▼          ▼
-                   PostGIS     MBTiles    GeoJSON   GeoPackage
-                  (ST_AsMVT)  (预切片)   (内存引擎)  (内存引擎)
-                    数据库      静态文件    静态文件     静态文件
+                    └──┬────────┬────────┬────────┬────────┬────────┘
+                       ▼        ▼        ▼        ▼        ▼
+                  PostGIS   MySQL    PMTiles  MBTiles   GeoJSON/GeoPackage
+                 (ST_AsMVT) (bbox+MVT) (归档)  (预切片)      (内存引擎)
+                   数据库     数据库    静态文件  静态文件       静态文件
 ```
 
 ## 3. 数据源抽象
@@ -58,14 +58,17 @@ type FeatureSource interface {
 }
 ```
 
-一个数据源可以同时实现两个接口（如 PostGIS、GeoJSON、GeoPackage），
-也可以只实现其一（MBTiles 只做 TileSource）。
+一个数据源可以同时实现两个接口（如 PostGIS、MySQL、GeoJSON、GeoPackage），
+也可以只实现其一（PMTiles、MBTiles 只做 TileSource）。PMTiles 另实现
+`ArchiveSource`，供 HTTP 层以独立文件句柄提供 Range/206 原始归档。
 
 ### 3.1 各数据源实现策略
 
 | 数据源 | 类型 | 切片方式 | 要素查询 | 依赖 |
 |---|---|---|---|---|
 | PostGIS | 数据库 | 下推 `ST_AsMVT`/`ST_TileEnvelope` 动态生成 | SQL + `ST_AsGeoJSON`，bbox 下推 | jackc/pgx（纯 Go）|
+| MySQL 8 / MariaDB | 数据库 | `MBRIntersects` bbox 下推，只取当前瓦片候选要素，再复用 memengine 编码 gzip MVT | SQL + `ST_AsGeoJSON`，bbox/分页下推 | go-sql-driver/mysql（纯 Go）|
+| PMTiles | 静态文件 | v3 header + Hilbert tile id + root/leaf directory 定位；亦可 Range 直读归档 | 不支持 | 标准库（none/gzip）|
 | MBTiles | 静态文件 | 直接读预切片（vector pbf 或 png/jpg/webp 栅格），TMS y 翻转 | 不支持 | modernc.org/sqlite（纯 Go）|
 | GeoJSON | 静态文件 | 启动时载入内存引擎，动态裁剪+简化+编码 MVT | 内存 bbox 过滤 | paulmach/orb |
 | GeoPackage | 静态文件 | 启动时解析 GPB→WKB 载入同一内存引擎 | 同上 | modernc.org/sqlite + orb/encoding/wkb |
@@ -79,6 +82,11 @@ GeoJSON 与 GeoPackage 共享同一个内存引擎：
   （带 buffer）→ `orb/encoding/mvt` 编码 → gzip
 - 要素请求：bbox 过滤 + limit/offset 分页，输出 GeoJSON
 - 定位是"中小规模静态数据"（十万级要素以内），大数据请用 PostGIS 或预切 MBTiles
+
+MySQL 数据仍是逐请求动态查询，不做全表内存快照。单瓦片最多接受 50,000 个候选要素；
+超出时返回明确错误，防止低 zoom 意外拉取整张大表。连接器启动时读取服务版本并适配
+MySQL/MariaDB 方言：MySQL 8 使用 `axis-order=long-lat` 与 `ST_Transform`；
+MariaDB 11 不支持这两项扩展，因此 bbox 构造使用二参数形式，且仅接受 SRID 0/4326。
 
 ## 4. HTTP API 设计
 
@@ -97,6 +105,7 @@ GeoJSON 与 GeoPackage 共享同一个内存引擎：
 |---|---|
 | `GET /tiles/{layer}/{z}/{x}/{y}.{ext}` | XYZ 切片，ext = pbf / mvt / png / jpg / webp |
 | `GET /tiles/{layer}.json` | TileJSON 3.0 元数据 |
+| `GET /archives/{layer}.pmtiles` | PMTiles 原始归档（HEAD、Range/206、条件请求）|
 | `GET /wmts/1.0.0/WMTSCapabilities.xml` | WMTS 能力文档（RESTful）|
 | `GET /wmts/1.0.0/{layer}/default/GoogleMapsCompatible/{z}/{y}/{x}.{ext}` | WMTS RESTful GetTile |
 
@@ -187,6 +196,18 @@ sources:
     type: mbtiles
     path: ./data/basemap.mbtiles
 
+  - name: warehouses       # MySQL 8 / MariaDB 动态矢量切片
+    type: mysql
+    dsn: mysql://reader:pass@localhost:3306/gis
+    table: gis.warehouse
+    geometry_column: location
+    id_column: id
+    srid: 4326
+
+  - name: regional         # PMTiles v3 单文件归档
+    type: pmtiles
+    path: ./data/regional.pmtiles
+
   - name: pois             # 静态 GeoJSON
     type: geojson
     path: ./data/pois.geojson
@@ -207,11 +228,13 @@ internal/cache/          两级缓存（内存 LRU + 磁盘持久层）
 internal/mcpserver/      MCP 端点（JSON-RPC / Streamable HTTP）
 internal/source/         接口定义 + registry（按配置构建数据源）
 internal/source/postgis/     PostGIS 实现
+internal/source/mysql/       MySQL 8 / MariaDB 实现（bbox 下推 + MVT 编码）
 internal/source/mbtiles/     MBTiles 实现
+internal/source/pmtiles/     PMTiles v3 读取器（XYZ + archive Range 分发）
 internal/source/memengine/   内存要素引擎（MVT 编码、要素查询）
 internal/source/geojsonsrc/  GeoJSON 加载器 → memengine
 internal/source/geopackage/  GeoPackage 加载器（GPB/WKB 解析）→ memengine
-internal/server/         HTTP 服务、路由、handler、middleware
+internal/server/         HTTP 服务、路由、handler、middleware、内嵌 WebUI
 internal/algo/           算法插件框架（Algorithm/Registry/Env）
 internal/algo/network/   可路由图（多层、构图、索引、Dijkstra/A*）
 internal/algo/routing/   最短路径、等时圈、路径匹配

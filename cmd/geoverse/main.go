@@ -121,7 +121,7 @@ func run(configPath string, log *slog.Logger) error {
 	}
 
 	server.Version = version
-	srv := server.New(cfg, reg, store, log)
+	srv := server.NewManaged(cfg, configPath, reg, store, log)
 	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 	httpSrv := &http.Server{
 		Addr:              addr,

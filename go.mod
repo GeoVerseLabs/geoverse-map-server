@@ -3,6 +3,7 @@ module github.com/GeoVerseLabs/geoverse-map-server
 go 1.25.0
 
 require (
+	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/paulmach/orb v0.13.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -10,6 +11,7 @@ require (
 )
 
 require (
+	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

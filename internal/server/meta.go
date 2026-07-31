@@ -18,6 +18,7 @@ func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
 			{Href: base + "/conformance", Rel: "conformance", Type: "application/json"},
 			{Href: base + "/collections", Rel: "data", Type: "application/json", Title: "feature collections"},
 			{Href: base + "/catalog", Rel: "catalog", Type: "application/json", Title: "all layers"},
+			{Href: base + "/admin/", Rel: "service", Type: "text/html", Title: "data source management WebUI"},
 			{Href: base + "/algorithms", Rel: "algorithms", Type: "application/json", Title: "spatial algorithms"},
 			{Href: base + "/wmts/1.0.0/WMTSCapabilities.xml", Rel: "wmts", Type: "application/xml", Title: "WMTS capabilities"},
 			{Href: base + "/health", Rel: "health", Type: "application/json"},
@@ -71,6 +72,7 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 		Title    string            `json:"title,omitempty"`
 		Tiles    string            `json:"tiles,omitempty"`
 		TileJSON string            `json:"tilejson,omitempty"`
+		Archive  string            `json:"archive,omitempty"`
 		Items    string            `json:"items,omitempty"`
 		Format   string            `json:"format,omitempty"`
 		Bounds   *[4]float64       `json:"bounds,omitempty"`
@@ -92,6 +94,11 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := s.reg.FeatureSource(name); ok {
 			e.Items = fmt.Sprintf("%s/collections/%s/items", base, name)
+		}
+		if raw, ok := s.reg.Get(name); ok {
+			if _, ok := raw.(interface{ ArchivePath() string }); ok {
+				e.Archive = fmt.Sprintf("%s/archives/%s.pmtiles", base, name)
+			}
 		}
 		out = append(out, e)
 	}

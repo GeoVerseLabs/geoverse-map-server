@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
 )
 
 // readinessTTL bounds how often /readyz actually touches the sources.
@@ -87,6 +89,19 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
 
+	s.configMu.Lock()
+	configured := append([]config.Source(nil), s.cfg.Sources...)
+	configuredNetworks := append([]config.Network(nil), s.cfg.Networks...)
+	featureFlags := map[string]bool{
+		"auth":       s.cfg.Auth.Enabled,
+		"mcp":        s.cfg.MCP.Enabled,
+		"algorithms": s.cfg.Algorithms.On(),
+		"cors":       s.cfg.Server.CORS,
+		"diskCache":  s.cfg.Cache.Disk.Enabled,
+	}
+	algorithmsOn := s.cfg.Algorithms.On()
+	s.configMu.Unlock()
+
 	tiles, features := 0, 0
 	for _, name := range s.reg.Names() {
 		if _, ok := s.reg.TileSource(name); ok {
@@ -98,12 +113,16 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	algoNames := []string{}
-	if s.cfg.Algorithms.On() {
+	if algorithmsOn {
 		algoNames = s.algos.Names()
 	}
-	networks := make([]string, 0, len(s.cfg.Networks))
-	for _, n := range s.cfg.Networks {
+	networks := make([]string, 0, len(configuredNetworks))
+	for _, n := range configuredNetworks {
 		networks = append(networks, n.Name)
+	}
+	byType := map[string]int{}
+	for _, sc := range configured {
+		byType[sc.Type]++
 	}
 
 	writeJSON(w, http.StatusOK, "application/json", map[string]interface{}{
@@ -117,6 +136,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			"feature":  features,
 			"names":    s.reg.Names(),
 			"networks": networks,
+			"byType":   byType,
 		},
 		"requests": map[string]interface{}{
 			"total":            s.metrics.totalRequests(),
@@ -134,13 +154,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 			"sysBytes":   mem.Sys,
 			"gcCount":    mem.NumGC,
 		},
-		"features": map[string]bool{
-			"auth":       s.cfg.Auth.Enabled,
-			"mcp":        s.cfg.MCP.Enabled,
-			"algorithms": s.cfg.Algorithms.On(),
-			"cors":       s.cfg.Server.CORS,
-			"diskCache":  s.cfg.Cache.Disk.Enabled,
-		},
+		"features":   featureFlags,
 		"algorithms": algoNames,
 	})
 }

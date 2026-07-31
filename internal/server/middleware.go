@@ -85,7 +85,9 @@ func authMiddleware(apiKeys []string, next http.Handler) http.Handler {
 		return ok
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health" || r.URL.Path == "/readyz" {
+		publicWebUIAsset := (r.Method == http.MethodGet || r.Method == http.MethodHead) &&
+			(r.URL.Path == "/admin/" || r.URL.Path == "/admin/app.css" || r.URL.Path == "/admin/app.js")
+		if r.URL.Path == "/health" || r.URL.Path == "/readyz" || publicWebUIAsset {
 			next.ServeHTTP(w, r)
 			return
 		}

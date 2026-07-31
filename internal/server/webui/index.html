@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>GeoVerse Serve · 数据源控制台</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%230b100d'/%3E%3Cpath d='M14 14h36v36H14z' fill='none' stroke='%23b8f252' stroke-width='4'/%3E%3Cpath d='M23 25h18v4H27v10h10v-3h-6v-4h11v11H23z' fill='%23b8f252'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/admin/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail">
+        <a class="brand" href="/admin/" aria-label="GeoVerse Serve">
+          <span class="brand-mark">GV</span>
+          <span><strong>GeoVerse</strong><small>SERVE / CONTROL</small></span>
+        </a>
+        <nav>
+          <button class="nav-item active" type="button" data-view="sources">
+            <span class="nav-icon"></span>
+            数据源
+          </button>
+          <button class="nav-item" type="button" data-view="catalog">
+            <span class="nav-icon hollow"></span>
+            服务目录
+          </button>
+          <button class="nav-item" type="button" data-view="stats">
+            <span class="nav-icon bars"></span>
+            运行统计
+          </button>
+        </nav>
+        <form class="rail-foot" id="api-key-form">
+          <label for="api-key">API KEY</label>
+          <input id="api-key" type="password" autocomplete="off" placeholder="可选，保存在本次会话" />
+          <div class="server-state"><i></i><span id="server-state">正在连接服务</span></div>
+        </form>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="page-eyebrow">DATA INFRASTRUCTURE / 01</p>
+            <h1 id="page-title">数据源控制台</h1>
+            <p class="subtitle" id="page-subtitle">把数据库与静态归档接入同一套 XYZ、WMTS 与 OGC 分发接口。</p>
+          </div>
+          <button class="primary" id="add-source" type="button">
+            <span>＋</span> 添加数据源
+          </button>
+        </header>
+
+        <section class="view-pane" id="view-sources">
+          <section class="summary" aria-label="数据源摘要">
+            <div><small>已登记</small><strong id="count-total">—</strong><span>sources</span></div>
+            <div><small>连接正常</small><strong id="count-ok">—</strong><span>healthy</span></div>
+            <div><small>切片服务</small><strong id="count-tile">—</strong><span>tile capable</span></div>
+            <div class="summary-accent"><small>配置状态</small><strong id="write-state">检查中</strong><span>config.yaml</span></div>
+          </section>
+
+          <section class="content-head">
+            <div>
+              <h2>连接清单</h2>
+              <span id="last-refresh">等待首次读取</span>
+            </div>
+            <button class="ghost" id="refresh" type="button">刷新状态</button>
+          </section>
+          <section class="source-grid" id="source-grid" aria-live="polite">
+            <div class="empty loading">正在读取配置与连接状态…</div>
+          </section>
+        </section>
+
+        <section class="view-pane" id="view-catalog" hidden>
+          <section class="summary" aria-label="服务目录摘要">
+            <div><small>服务图层</small><strong id="catalog-total">—</strong><span>layers</span></div>
+            <div><small>XYZ / WMTS</small><strong id="catalog-tile">—</strong><span>tile services</span></div>
+            <div><small>OGC Features</small><strong id="catalog-feature">—</strong><span>collections</span></div>
+            <div class="summary-accent"><small>原始归档</small><strong id="catalog-archive">—</strong><span>range enabled</span></div>
+          </section>
+          <section class="content-head">
+            <div>
+              <h2>可分发服务</h2>
+              <span id="catalog-refresh">等待首次读取</span>
+            </div>
+            <button class="ghost" id="refresh-catalog" type="button">刷新目录</button>
+          </section>
+          <section class="source-grid" id="catalog-grid" aria-live="polite">
+            <div class="empty loading">正在读取服务目录…</div>
+          </section>
+        </section>
+
+        <section class="view-pane" id="view-stats" hidden>
+          <section class="summary" aria-label="运行统计摘要">
+            <div><small>运行时间</small><strong id="stats-uptime">—</strong><span>uptime</span></div>
+            <div><small>累计请求</small><strong id="stats-requests">—</strong><span>requests</span></div>
+            <div><small>并发请求</small><strong id="stats-inflight">—</strong><span>in flight</span></div>
+            <div class="summary-accent"><small>服务版本</small><strong id="stats-version">—</strong><span>build</span></div>
+          </section>
+          <section class="content-head">
+            <div>
+              <h2>运行概览</h2>
+              <span id="stats-refresh">等待首次读取</span>
+            </div>
+            <button class="ghost" id="refresh-stats" type="button">刷新统计</button>
+          </section>
+          <section class="stats-grid" id="stats-grid" aria-live="polite">
+            <div class="empty loading">正在读取运行统计…</div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div class="drawer-backdrop" id="drawer-backdrop" hidden>
+      <aside class="drawer" aria-label="数据源配置">
+        <header>
+          <div>
+            <p class="eyebrow">SOURCE CONFIGURATION</p>
+            <h2 id="drawer-title">添加数据源</h2>
+          </div>
+          <button class="close" id="close-drawer" type="button" aria-label="关闭">×</button>
+        </header>
+        <form id="source-form">
+          <fieldset>
+            <legend>01 / 类型</legend>
+            <div class="type-switch" id="type-switch"></div>
+          </fieldset>
+          <fieldset>
+            <legend>02 / 标识</legend>
+            <div class="form-grid two">
+              <label><span>名称 <b>*</b></span><input name="name" required pattern="[A-Za-z0-9_.\x2D]+" placeholder="local-roads" /></label>
+              <label><span>显示标题</span><input name="title" placeholder="本地道路数据" /></label>
+            </div>
+            <label><span>说明</span><textarea name="description" rows="2" placeholder="用途、数据口径或更新频率"></textarea></label>
+          </fieldset>
+          <fieldset>
+            <legend>03 / 连接</legend>
+            <div id="connection-fields"></div>
+          </fieldset>
+          <fieldset>
+            <legend>04 / 切片范围</legend>
+            <div class="form-grid two">
+              <label><span>最小层级</span><input name="min_zoom" type="number" min="0" max="30" placeholder="自动" /></label>
+              <label><span>最大层级</span><input name="max_zoom" type="number" min="0" max="30" placeholder="自动" /></label>
+            </div>
+          </fieldset>
+          <div class="probe-result" id="probe-result" hidden></div>
+          <div class="drawer-actions">
+            <button class="ghost" id="local-db-example" type="button">填入本地 PostgreSQL 示例</button>
+            <span></span>
+            <button class="secondary" id="probe-source" type="button">测试连接</button>
+            <button class="primary" type="submit">测试并保存</button>
+          </div>
+        </form>
+      </aside>
+    </div>
+
+    <div class="toast" id="toast" role="status" hidden></div>
+    <script src="/admin/app.js" defer></script>
+  </body>
+</html>

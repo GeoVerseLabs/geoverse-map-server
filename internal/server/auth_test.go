@@ -85,3 +85,20 @@ func TestAuthExemptsHealth(t *testing.T) {
 		t.Errorf("health: status = %d, want 200 without credentials", got)
 	}
 }
+
+func TestAuthServesWebUIShellButProtectsSourceData(t *testing.T) {
+	ts := authedServer(t)
+	ui, _ := http.NewRequest(http.MethodGet, ts.URL+"/admin/", nil)
+	if got := status(t, ui); got != http.StatusOK {
+		t.Fatalf("WebUI shell: status = %d, want 200 without credentials", got)
+	}
+	sources, _ := http.NewRequest(http.MethodGet, ts.URL+"/admin/sources", nil)
+	if got := status(t, sources); got != http.StatusUnauthorized {
+		t.Fatalf("source data: status = %d, want 401 without credentials", got)
+	}
+	sources, _ = http.NewRequest(http.MethodGet, ts.URL+"/admin/sources", nil)
+	sources.Header.Set("X-API-Key", "sekrit")
+	if got := status(t, sources); got != http.StatusOK {
+		t.Fatalf("source data with key: status = %d, want 200", got)
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
@@ -198,4 +199,41 @@ func (s *Server) handleTileJSON(w http.ResponseWriter, r *http.Request) {
 		doc["format"] = ext
 	}
 	writeJSON(w, http.StatusOK, "application/json", doc)
+}
+
+// handleArchive serves the immutable PMTiles file itself. http.ServeContent
+// provides RFC-compliant Range/206, If-Modified-Since and HEAD behaviour,
+// enabling MapLibre's pmtiles:// protocol to fetch only the required bytes.
+func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
+	name, ok := strings.CutSuffix(r.PathValue("archive"), ".pmtiles")
+	if !ok {
+		writeError(w, http.StatusNotFound, "archive path must end in .pmtiles")
+		return
+	}
+	raw, ok := s.reg.Get(name)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown archive %q", name))
+		return
+	}
+	archive, ok := raw.(source.ArchiveSource)
+	if !ok {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("source %q is not an archive", name))
+		return
+	}
+	f, err := os.Open(archive.ArchivePath())
+	if err != nil {
+		s.log.Error("open archive", "source", name, "error", err)
+		writeError(w, http.StatusInternalServerError, "archive is unavailable")
+		return
+	}
+	defer f.Close()
+	stat, err := f.Stat()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "archive metadata is unavailable")
+		return
+	}
+	w.Header().Set("Content-Type", archive.ArchiveContentType())
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Accept-Ranges", "bytes")
+	http.ServeContent(w, r, stat.Name(), stat.ModTime(), f)
 }
