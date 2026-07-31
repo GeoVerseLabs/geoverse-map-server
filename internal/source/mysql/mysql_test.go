@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/encoding/mvt"
 	"github.com/paulmach/orb/maptile"
 
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
@@ -64,6 +65,17 @@ func TestSQLHelpers(t *testing.T) {
 	if !strings.HasPrefix(wkt, "POLYGON((120.1 30.2,121.3 30.2") ||
 		!strings.HasSuffix(wkt, "120.1 30.2))") {
 		t.Fatalf("wkt = %q", wkt)
+	}
+	got := clampWGS84Bound(orb.Bound{
+		Min: orb.Point{-216, -90},
+		Max: orb.Point{216, 90},
+	})
+	want := orb.Bound{
+		Min: orb.Point{-180 + 1e-9, -85.05112877980659},
+		Max: orb.Point{180 - 1e-9, 85.05112877980659},
+	}
+	if got != want {
+		t.Fatalf("clampWGS84Bound() = %v, want %v", got, want)
 	}
 }
 
@@ -134,12 +146,18 @@ func TestMySQLIntegration(t *testing.T) {
 	if err != nil || feature.ID == nil {
 		t.Fatalf("feature %v = %#v, %v", firstID, feature, err)
 	}
-	tile := maptile.At(orb.Point{121.5893, 31.2047}, 8)
-	payload, err := src.Tile(ctx, uint32(tile.Z), tile.X, tile.Y)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(payload) < 2 || payload[0] != 0x1f || payload[1] != 0x8b {
-		t.Fatalf("tile is not gzipped MVT: %x", payload[:min(len(payload), 8)])
+	for _, zoom := range []maptile.Zoom{0, 1, 2, 8} {
+		tile := maptile.At(orb.Point{121.5893, 31.2047}, zoom)
+		payload, err := src.Tile(ctx, uint32(tile.Z), tile.X, tile.Y)
+		if err != nil {
+			t.Fatalf("tile %v: %v", tile, err)
+		}
+		if len(payload) < 2 || payload[0] != 0x1f || payload[1] != 0x8b {
+			t.Fatalf("tile %v is not gzipped MVT: %x", tile, payload[:min(len(payload), 8)])
+		}
+		layers, err := mvt.UnmarshalGzipped(payload)
+		if err != nil || len(layers) != 1 || len(layers[0].Features) == 0 {
+			t.Fatalf("tile %v decode = %d layers, %v", tile, len(layers), err)
+		}
 	}
 }
