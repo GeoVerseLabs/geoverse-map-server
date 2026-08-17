@@ -140,7 +140,7 @@ func (s *Server) handleProbeSource(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
-	candidate, err := registry.OpenWithAssets(ctx, sc, s.cfg.Assets)
+	candidate, err := registry.OpenWithPolicies(ctx, sc, s.cfg.Assets, s.cfg.DataSources)
 	if err == nil {
 		defer candidate.Close()
 		err = candidate.Ping(ctx)
@@ -180,7 +180,7 @@ func (s *Server) handleSaveSource(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	candidate, err := registry.OpenWithAssets(ctx, sc, s.cfg.Assets)
+	candidate, err := registry.OpenWithPolicies(ctx, sc, s.cfg.Assets, s.cfg.DataSources)
 	if err == nil {
 		err = candidate.Ping(ctx)
 	}

@@ -35,6 +35,16 @@ assets:
   max_file_size_mb: 8192          # MBTiles / PMTiles 等文件的统一上限；0 = 不限制
   max_memory_file_size_mb: 256    # GeoJSON / GeoPackage 加载到内存前的更严格上限
 
+# PostGIS / MySQL 数据源的 schema/table 白名单，与账号自身权限相互独立的
+# 第二层保护——账号能读到的表里，只有列在这里的才会被真正注册成对外图层。
+# 两个列表都省略时保持兼容行为（账号能读到的表都可注册），由 doctor 提醒。
+# data_sources:
+#   allowed_schemas: [geo, public]
+#   allowed_tables: [geo.feature, public.roads]
+#   require_readonly_role: true   # 仅影响 `-doctor` 输出：探测账号在目标表上
+#                                  # 是否持有超出 SELECT 的权限，探测失败按
+#                                  # 信息提示处理，不算 warning，不会阻止启动
+
 sources:
   # ── 数据库：PostGIS 动态矢量切片（需要 PostGIS >= 3.0）──────────
   # 与 WebUI「填入本地 PostgreSQL 示例」一致；请按本机库名/账号/表名修改。

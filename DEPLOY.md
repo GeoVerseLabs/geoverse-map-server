@@ -331,7 +331,43 @@ alpine 基础镜像同理。两处改动应在同一次提交里完成，避免 
 
 ---
 
-## 九、生产清单
+## 九、数据源最小权限与 allowlist
+
+`config.yaml` 的 `data_sources.allowed_schemas`/`allowed_tables` 是**第二层**保护——
+DSN 账号自身的 GRANT 才是真正的安全边界，allowlist 只是拦住"注册错表"这类配置失误。
+两者都应该配，缺一不可。
+
+### 建库脚本模板
+
+`require_readonly_role: true` 时 `-doctor` 会探测配置账号在目标表上是否持有
+超出 `SELECT` 的权限。真实起过一次这个探测就会发现：本文档配的示例账号、
+以及大多数"图省事直接用建库账号"的部署，默认都不是只读——包括
+`docker-compose` 里 MySQL 官方镜像用 `MYSQL_USER`/`MYSQL_DATABASE`
+自动创建的账号，它在该数据库上被授予的是 **ALL PRIVILEGES**，不是 SELECT。
+生产环境请单独建一个只读账号：
+
+**PostGIS**：
+
+```sql
+CREATE ROLE geoverse_ro LOGIN PASSWORD '<换成真实密码>';
+GRANT USAGE ON SCHEMA <schema> TO geoverse_ro;
+GRANT SELECT ON <schema>.<table> TO geoverse_ro;
+```
+
+**MySQL 8 / MariaDB**（语法双方一致）：
+
+```sql
+CREATE USER 'geoverse_ro'@'%' IDENTIFIED BY '<换成真实密码>';
+GRANT SELECT ON <schema>.<table> TO 'geoverse_ro'@'%';
+```
+
+改完 DSN 账号后重新跑一次 `-doctor`，`data_sources.excess_privileges` 警告应
+该消失。探测本身探测不到时（部分托管数据库限制普通账号查询权限目录）不算
+warning，只在 detail 里给出提示，不会把这种情况误判成"账号越权"。
+
+---
+
+## 十、生产清单
 
 - [ ] `geoverse -doctor` 无资产边界或大小上限警告
 - [ ] `geoverse -validate` 退出码 0
@@ -344,3 +380,4 @@ alpine 基础镜像同理。两处改动应在同一次提交里完成，避免 
 - [ ] 日志轮转（compose 已配 `max-size`/`max-file`）
 - [ ] 基础镜像 digest 复核未超过一个季度（见七节）
 - [ ] 最近一次 SBOM/许可证/漏洞扫描 artifact 已过一遍（见七节）
+- [ ] PostGIS/MySQL 数据源已配 `data_sources` allowlist，DSN 账号已按九节收窄到只读

@@ -15,14 +15,15 @@ import (
 
 // Config is the root of the YAML configuration.
 type Config struct {
-	Server     Server     `yaml:"server"`
-	Assets     Assets     `yaml:"assets"`
-	Cache      Cache      `yaml:"cache"`
-	Auth       Auth       `yaml:"auth"`
-	MCP        MCP        `yaml:"mcp"`
-	Algorithms Algorithms `yaml:"algorithms"`
-	Sources    []Source   `yaml:"sources"`
-	Networks   []Network  `yaml:"networks"`
+	Server      Server           `yaml:"server"`
+	Assets      Assets           `yaml:"assets"`
+	DataSources DataSourcePolicy `yaml:"data_sources"`
+	Cache       Cache            `yaml:"cache"`
+	Auth        Auth             `yaml:"auth"`
+	MCP         MCP              `yaml:"mcp"`
+	Algorithms  Algorithms       `yaml:"algorithms"`
+	Sources     []Source         `yaml:"sources"`
+	Networks    []Network        `yaml:"networks"`
 }
 
 // Algorithms toggles the algorithm endpoints (enabled by default).
@@ -116,9 +117,10 @@ type Source struct {
 	Cache    *bool         `yaml:"cache" json:"cache,omitempty"`       // per-source cache override
 	TileTTL  time.Duration `yaml:"tile_ttl" json:"-"`                  // reserved for future per-source TTL
 
-	// AssetPolicy is attached at runtime by the registry. It must never be
-	// persisted or returned by the management API.
-	AssetPolicy Assets `yaml:"-" json:"-"`
+	// AssetPolicy and DBPolicy are attached at runtime by the registry. They
+	// must never be persisted or returned by the management API.
+	AssetPolicy Assets           `yaml:"-" json:"-"`
+	DBPolicy    DataSourcePolicy `yaml:"-" json:"-"`
 }
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)

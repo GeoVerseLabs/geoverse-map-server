@@ -203,6 +203,11 @@ assets:
   max_file_size_mb: 8192
   max_memory_file_size_mb: 256
 
+data_sources:
+  allowed_schemas: [gis]
+  allowed_tables: [gis.roads, gis.warehouse]
+  require_readonly_role: true
+
 sources:
   - name: roads            # PostGIS 动态矢量切片
     type: postgis
@@ -248,6 +253,20 @@ PostGIS 的 `id_column` 可配置 UUID/text 主键用于 OGC Features 单要素�
 整文件入内存的数据源。未配置时保持历史兼容行为，由 `geoverse -doctor` 给出警告。
 PMTiles Archive 每次请求重新打开并复核文件身份，避免服务启动后链接目标被替换。
 
+`data_sources`（`internal/config/datasource_policy.go`）是 PostGIS/MySQL 的对应机制：
+`allowed_schemas`/`allowed_tables` 在 `registry.OpenWithPolicies` 里于建立数据库连接
+**之前**执行（schema/table 是纯字符串推导，不依赖网络），把"注册到了错误的表"这类配置
+失误挡在建连之前；这是与 DSN 账号权限独立的第二层保护，不是权限机制本身。
+`require_readonly_role` 只影响 `-doctor`：`source.PrivilegeProbe` 接口让 postgis/mysql
+各自实现 `ExcessPrivileges(ctx)`，PostGIS 用 `has_table_privilege` 逐项查
+INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER；MySQL/MariaDB 并查
+`USER_PRIVILEGES`/`SCHEMA_PRIVILEGES`/`TABLE_PRIVILEGES` 三个作用域（只查
+TABLE_PRIVILEGES 会漏掉全局或库级授权——例如 MySQL 官方镜像用
+`MYSQL_USER`/`MYSQL_DATABASE` 自动建的账号就是库级 `ALL PRIVILEGES`，不会出现在
+TABLE_PRIVILEGES 里），并对 `SCHEMA_PRIVILEGES.TABLE_SCHEMA` 做 `\_`/`\%` 反转义
+（MySQL 8 官方镜像的库级授权会把库名当作 LIKE 模式转义存储，手动执行的
+`GRANT ... ON db.*` 不一定会转义；反转义在未转义时是空操作，两种形态都安全）。
+
 CLI 诊断位于 `internal/diagnostics`：`-doctor` 检查完整部署，`-inspect <name|all>` 输出
 选定源的资产、能力与元数据。`-format json` 使用带 `schemaVersion` 的稳定报告；诊断只读，
 警告不改变退出码，错误退出 1。
@@ -257,6 +276,7 @@ CLI 诊断位于 `internal/diagnostics`：`-doctor` 检查完整部署，`-inspe
 ```
 cmd/geoverse/            入口（flag 解析、优雅退出）
 internal/config/         YAML 配置解析与校验
+internal/config/datasource_policy.go  PostGIS/MySQL 的 allowed_schemas/allowed_tables 白名单
 internal/diagnostics/    doctor / inspect 只读诊断与文本、JSON 输出
 internal/tilemath/       Web Mercator 切片数学（z/x/y ↔ bbox）
 internal/cache/          两级缓存（内存 LRU + 磁盘持久层）

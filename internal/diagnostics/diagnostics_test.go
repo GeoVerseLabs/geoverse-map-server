@@ -78,6 +78,30 @@ func TestDoctorCompatibilityWarningsDoNotFail(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsWhenDataSourceAllowlistUnconfigured(t *testing.T) {
+	path := diagnosticConfig(t, "  - name: unreachable\n    type: postgis\n    dsn: postgres://reader:secret@127.0.0.1:1/gis\n    table: public.roads\n")
+	report := Doctor(context.Background(), path)
+	var found bool
+	for _, f := range report.Findings {
+		if f.Code == "data_sources.allowlist_not_configured" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected data_sources.allowlist_not_configured warning, got %+v", report.Findings)
+	}
+
+	// A file-only config (no postgis/mysql source) must not get this
+	// warning — there is nothing for an allowlist to restrict.
+	fileOnly := diagnosticConfig(t, "")
+	report = Doctor(context.Background(), fileOnly)
+	for _, f := range report.Findings {
+		if f.Code == "data_sources.allowlist_not_configured" {
+			t.Fatalf("file-only config must not warn about data_sources: %+v", report.Findings)
+		}
+	}
+}
+
 func TestDiagnosticOutputLeaksNoDSNPassword(t *testing.T) {
 	path := diagnosticConfig(t, "  - name: db\n    type: postgis\n    dsn: postgres://reader:topsecret@127.0.0.1:1/gis\n    table: public.roads\n")
 	report := Inspect(context.Background(), path, "db")

@@ -110,8 +110,17 @@ func Doctor(ctx context.Context, configPath string) Report {
 			Message:  "assets.max_memory_file_size_mb is unlimited",
 		})
 	}
+	if !cfg.DataSources.Configured() && hasDatabaseSource(cfg.Sources) {
+		report.Findings = append(report.Findings, Finding{
+			Severity: SeverityWarning,
+			Code:     "data_sources.allowlist_not_configured",
+			Message:  "postgis/mysql sources run without a schema/table allowlist; configure data_sources.allowed_schemas or allowed_tables",
+		})
+	}
 	for _, sc := range cfg.Sources {
-		report.Sources = append(report.Sources, inspectSource(ctx, cfg, sc))
+		src, findings := inspectSource(ctx, cfg, sc)
+		report.Sources = append(report.Sources, src)
+		report.Findings = append(report.Findings, findings...)
 	}
 	report.Status = reportStatus(report)
 	return report
@@ -125,7 +134,9 @@ func Inspect(ctx context.Context, configPath, selector string) Report {
 	selector = strings.TrimSpace(selector)
 	for _, sc := range cfg.Sources {
 		if selector == "all" || sc.Name == selector {
-			report.Sources = append(report.Sources, inspectSource(ctx, cfg, sc))
+			src, findings := inspectSource(ctx, cfg, sc)
+			report.Sources = append(report.Sources, src)
+			report.Findings = append(report.Findings, findings...)
 		}
 	}
 	if len(report.Sources) == 0 {
@@ -161,14 +172,14 @@ func loadReport(configPath, mode string) (Report, *config.Config) {
 	return report, cfg
 }
 
-func inspectSource(ctx context.Context, cfg *config.Config, sc config.Source) SourceReport {
+func inspectSource(ctx context.Context, cfg *config.Config, sc config.Source) (SourceReport, []Finding) {
 	report := SourceReport{Name: sc.Name, Type: sc.Type, Status: "ok"}
 	if fileBacked(sc.Type) {
 		asset, err := cfg.Assets.InspectAsset(sc.Path, memoryBacked(sc.Type))
 		if err != nil {
 			report.Status = "error"
 			report.Detail = sanitizeDetail(err.Error(), sc.DSN)
-			return report
+			return report, nil
 		}
 		report.Asset = &AssetReport{
 			RequestedPath: asset.RequestedPath,
@@ -178,7 +189,7 @@ func inspectSource(ctx context.Context, cfg *config.Config, sc config.Source) So
 	}
 	openCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	opened, err := registry.OpenWithAssets(openCtx, sc, cfg.Assets)
+	opened, err := registry.OpenWithPolicies(openCtx, sc, cfg.Assets, cfg.DataSources)
 	if err == nil {
 		err = opened.Ping(openCtx)
 	}
@@ -188,7 +199,7 @@ func inspectSource(ctx context.Context, cfg *config.Config, sc config.Source) So
 		}
 		report.Status = "error"
 		report.Detail = sanitizeDetail(err.Error(), sc.DSN)
-		return report
+		return report, nil
 	}
 	defer opened.Close()
 	if tile, ok := opened.(source.TileSource); ok {
@@ -208,7 +219,38 @@ func inspectSource(ctx context.Context, cfg *config.Config, sc config.Source) So
 		report.Capabilities = append(report.Capabilities, "archive")
 	}
 	sort.Strings(report.Capabilities)
-	return report
+
+	var findings []Finding
+	if cfg.DataSources.RequireReadOnlyRole {
+		if probe, ok := opened.(source.PrivilegeProbe); ok {
+			excess, err := probe.ExcessPrivileges(openCtx)
+			switch {
+			case err != nil:
+				// Not a warning: many managed databases restrict privilege
+				// catalog access even for legitimate limited accounts, so a
+				// failed probe is not evidence of an over-privileged one.
+				report.Detail = "privilege probe did not run: " + sanitizeDetail(err.Error(), sc.DSN)
+			case len(excess) > 0:
+				findings = append(findings, Finding{
+					Severity: SeverityWarning,
+					Code:     "data_sources.excess_privileges",
+					Source:   sc.Name,
+					Message: fmt.Sprintf("account for %q holds privileges beyond SELECT: %s",
+						sc.Name, strings.Join(excess, ", ")),
+				})
+			}
+		}
+	}
+	return report, findings
+}
+
+func hasDatabaseSource(sources []config.Source) bool {
+	for _, sc := range sources {
+		if sc.Type == "postgis" || sc.Type == "mysql" {
+			return true
+		}
+	}
+	return false
 }
 
 func reportStatus(report Report) string {

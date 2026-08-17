@@ -57,6 +57,13 @@ func New(ctx context.Context, cfg config.Source) (*Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
 	}
+	// Schema/table are pure string derivations from the DSN and config, so
+	// the allowlist can reject a misconfigured source before it ever opens
+	// a connection.
+	schema, table := splitTable(cfg.Table, driverCfg.DBName)
+	if err := cfg.DBPolicy.CheckTable(schema, table); err != nil {
+		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
+	}
 	connector, err := mysqldriver.NewConnector(driverCfg)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: connector: %w", cfg.Name, err)
@@ -75,7 +82,6 @@ func New(ctx context.Context, cfg config.Source) (*Source, error) {
 		return nil, fmt.Errorf("source %q: detect server version: %w", cfg.Name, err)
 	}
 
-	schema, table := splitTable(cfg.Table, driverCfg.DBName)
 	s := &Source{
 		name:     cfg.Name,
 		db:       db,
@@ -560,3 +566,47 @@ func (s *Source) Ping(ctx context.Context) error { return s.db.PingContext(ctx) 
 
 // Close implements source.Source.
 func (s *Source) Close() error { return s.db.Close() }
+
+// excessPrivilegesQuery unions all three grant scopes that can apply to a
+// table (global, schema, table) — checking TABLE_PRIVILEGES alone misses
+// privileges granted at the wider scopes entirely (a global `GRANT ALL ON
+// *.*` never appears in TABLE_PRIVILEGES). SCHEMA_PRIVILEGES.TABLE_SCHEMA
+// can come back with `_`/`%` backslash-escaped (MySQL 8's official docker
+// image grants observably store it that way; a plain `GRANT ... ON db.*`
+// typed by hand may not); the REPLACE unescapes both, and is a no-op when
+// the value was never escaped, so it is safe on either shape.
+const excessPrivilegesQuery = `
+SELECT DISTINCT PRIVILEGE_TYPE FROM (
+  SELECT PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES
+  WHERE GRANTEE = CONCAT("'", SUBSTRING_INDEX(CURRENT_USER(), '@', 1), "'@'", SUBSTRING_INDEX(CURRENT_USER(), '@', -1), "'")
+  UNION ALL
+  SELECT PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES
+  WHERE GRANTEE = CONCAT("'", SUBSTRING_INDEX(CURRENT_USER(), '@', 1), "'@'", SUBSTRING_INDEX(CURRENT_USER(), '@', -1), "'")
+    AND REPLACE(REPLACE(TABLE_SCHEMA, '\\_', '_'), '\\%', '%') = ?
+  UNION ALL
+  SELECT PRIVILEGE_TYPE FROM information_schema.TABLE_PRIVILEGES
+  WHERE GRANTEE = CONCAT("'", SUBSTRING_INDEX(CURRENT_USER(), '@', 1), "'@'", SUBSTRING_INDEX(CURRENT_USER(), '@', -1), "'")
+    AND TABLE_SCHEMA = ? AND TABLE_NAME = ?
+) granted
+WHERE PRIVILEGE_TYPE NOT IN ('USAGE', 'SELECT')
+ORDER BY PRIVILEGE_TYPE`
+
+// ExcessPrivileges implements source.PrivilegeProbe. Behaviour is identical
+// on MySQL 8 and MariaDB — information_schema.{USER,SCHEMA,TABLE}_PRIVILEGES
+// exist on both with the same columns.
+func (s *Source) ExcessPrivileges(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, excessPrivilegesQuery, s.schema, s.schema, s.table)
+	if err != nil {
+		return nil, fmt.Errorf("probe privileges: %w", err)
+	}
+	defer rows.Close()
+	var excess []string
+	for rows.Next() {
+		var priv string
+		if err := rows.Scan(&priv); err != nil {
+			return nil, fmt.Errorf("probe privileges: %w", err)
+		}
+		excess = append(excess, priv)
+	}
+	return excess, rows.Err()
+}

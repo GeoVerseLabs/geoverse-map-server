@@ -2,7 +2,9 @@ package mysql
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -159,5 +161,100 @@ func TestMySQLIntegration(t *testing.T) {
 		if err != nil || len(layers) != 1 || len(layers[0].Features) == 0 {
 			t.Fatalf("tile %v decode = %d layers, %v", tile, len(layers), err)
 		}
+	}
+}
+
+func dsnWithUser(dsn, user, pass string) (string, error) {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "", err
+	}
+	u.User = url.UserPassword(user, pass)
+	return u.String(), nil
+}
+
+// TestMySQLExcessPrivileges proves ExcessPrivileges tells a properly scoped
+// account apart from an over-privileged one against a real server (MySQL 8
+// or MariaDB — GEOVERSE_TEST_MYSQL_DSN selects which). The "ambient account
+// shows excess" half only needs GEOVERSE_TEST_MYSQL_DSN; the deterministic
+// "scoped role shows zero excess" half additionally needs
+// GEOVERSE_TEST_MYSQL_ADMIN_DSN (a root-equivalent account able to CREATE
+// USER), since a MySQL "ALL PRIVILEGES ON db.*" grant does not itself
+// include the right to create other accounts.
+func TestMySQLExcessPrivileges(t *testing.T) {
+	dsn := os.Getenv("GEOVERSE_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("GEOVERSE_TEST_MYSQL_DSN is not set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	src, err := New(ctx, config.Source{
+		Name: "warehouses", Type: "mysql", DSN: dsn,
+		Table: "warehouse", GeometryColumn: "location", IDColumn: "id", SRID: 4326,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer src.Close()
+
+	// Documents a real, current gap: the docker-compose demo account (like
+	// most "just grant everything on my one database" setups, including
+	// what MySQL's own official image bootstraps via MYSQL_USER/
+	// MYSQL_DATABASE) holds far more than SELECT. See DEPLOY.md for the
+	// least-privilege account script this check exists to point operators
+	// at.
+	excess, err := src.ExcessPrivileges(ctx)
+	if err != nil {
+		t.Fatalf("ExcessPrivileges: %v", err)
+	}
+	if len(excess) == 0 {
+		t.Fatal("expected the demo DSN account to report excess privileges")
+	}
+
+	adminDSN := os.Getenv("GEOVERSE_TEST_MYSQL_ADMIN_DSN")
+	if adminDSN == "" {
+		t.Skip("GEOVERSE_TEST_MYSQL_ADMIN_DSN is not set; skipping the scoped-role half")
+	}
+	adminDriverCfg, err := parseURLDSN(adminDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := sql.Open("mysql", adminDriverCfg.FormatDSN())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+
+	roUser := fmt.Sprintf("gv_test_ro_%d", time.Now().UnixNano())
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"CREATE USER '%s'@'%%' IDENTIFIED BY 'gv_test_ro'", roUser)); err != nil {
+		t.Fatalf("create test user: %v", err)
+	}
+	defer admin.ExecContext(ctx, fmt.Sprintf("DROP USER '%s'@'%%'", roUser))
+	if _, err := admin.ExecContext(ctx, fmt.Sprintf(
+		"GRANT SELECT ON %s.warehouse TO '%s'@'%%'", src.schema, roUser)); err != nil {
+		t.Fatalf("grant select: %v", err)
+	}
+	defer admin.ExecContext(ctx, fmt.Sprintf("REVOKE SELECT ON %s.warehouse FROM '%s'@'%%'", src.schema, roUser))
+
+	roDSN, err := dsnWithUser(dsn, roUser, "gv_test_ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	roSrc, err := New(ctx, config.Source{
+		Name: "ro-check", Type: "mysql", DSN: roDSN,
+		Table: "warehouse", GeometryColumn: "location", IDColumn: "id", SRID: 4326,
+	})
+	if err != nil {
+		t.Fatalf("connect as read-only user: %v", err)
+	}
+	defer roSrc.Close()
+	excess, err = roSrc.ExcessPrivileges(ctx)
+	if err != nil {
+		t.Fatalf("ExcessPrivileges (read-only user): %v", err)
+	}
+	if len(excess) != 0 {
+		t.Fatalf("read-only user must report zero excess privileges, got %v", excess)
 	}
 }

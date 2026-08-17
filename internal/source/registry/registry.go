@@ -34,7 +34,7 @@ type Registry struct {
 func Build(ctx context.Context, cfg *config.Config) (*Registry, error) {
 	r := &Registry{sources: map[string]source.Source{}}
 	for _, sc := range cfg.Sources {
-		s, err := OpenWithAssets(ctx, sc, cfg.Assets)
+		s, err := OpenWithPolicies(ctx, sc, cfg.Assets, cfg.DataSources)
 		if err != nil {
 			r.Close()
 			return nil, err
@@ -45,17 +45,28 @@ func Build(ctx context.Context, cfg *config.Config) (*Registry, error) {
 	return r, nil
 }
 
-// Open constructs one source. Management endpoints use it to probe a
-// candidate before it is persisted or made visible to live requests.
+// Open constructs one source with no file or data-source policy applied.
+// Management endpoints use it to probe a candidate before it is persisted
+// or made visible to live requests.
 func Open(ctx context.Context, sc config.Source) (source.Source, error) {
-	return OpenWithAssets(ctx, sc, config.Assets{})
+	return OpenWithPolicies(ctx, sc, config.Assets{}, config.DataSourcePolicy{})
 }
 
-// OpenWithAssets constructs one source under the supplied file policy.
-// Database sources ignore the policy; file-backed sources resolve and enforce
-// it inside their constructors.
+// OpenWithAssets constructs one source under the supplied file policy, with
+// no data-source allowlist applied. Kept for callers that only care about
+// file-backed sources; prefer OpenWithPolicies for postgis/mysql.
 func OpenWithAssets(ctx context.Context, sc config.Source, policy config.Assets) (source.Source, error) {
-	sc.AssetPolicy = policy
+	return OpenWithPolicies(ctx, sc, policy, config.DataSourcePolicy{})
+}
+
+// OpenWithPolicies constructs one source under the supplied file and
+// data-source policies. File-backed sources resolve and enforce the asset
+// policy inside their constructors; postgis/mysql enforce the data-source
+// allowlist inside theirs. Each policy is a no-op for source types it does
+// not apply to.
+func OpenWithPolicies(ctx context.Context, sc config.Source, assets config.Assets, dbPolicy config.DataSourcePolicy) (source.Source, error) {
+	sc.AssetPolicy = assets
+	sc.DBPolicy = dbPolicy
 	switch sc.Type {
 	case "postgis":
 		opened, err := postgis.New(ctx, sc)

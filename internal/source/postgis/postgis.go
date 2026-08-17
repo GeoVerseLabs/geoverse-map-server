@@ -42,6 +42,10 @@ var (
 
 // New connects to the database and introspects the configured table.
 func New(ctx context.Context, cfg config.Source) (*Source, error) {
+	schema, table := splitTable(cfg.Table)
+	if err := cfg.DBPolicy.CheckTable(schema, table); err != nil {
+		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
+	}
 	pool, err := pgxpool.New(ctx, cfg.DSN)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: connect: %w", cfg.Name, err)
@@ -49,6 +53,8 @@ func New(ctx context.Context, cfg config.Source) (*Source, error) {
 	s := &Source{
 		name:    cfg.Name,
 		pool:    pool,
+		schema:  schema,
+		table:   table,
 		geomCol: firstNonEmpty(cfg.GeometryColumn, "geom"),
 		idCol:   cfg.IDColumn,
 		srid:    cfg.SRID,
@@ -61,7 +67,6 @@ func New(ctx context.Context, cfg config.Source) (*Source, error) {
 	if cfg.Buffer != nil {
 		s.buffer = *cfg.Buffer
 	}
-	s.schema, s.table = splitTable(cfg.Table)
 	if err := s.introspect(ctx, cfg); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
@@ -432,4 +437,31 @@ func (s *Source) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 func (s *Source) Close() error {
 	s.pool.Close()
 	return nil
+}
+
+// excessPrivilegeChecks are checked individually (rather than as one
+// comma-separated has_table_privilege call) so a positive result can name
+// exactly which privileges are held, which is what an operator needs to
+// know to write a tighter GRANT.
+var excessPrivilegeChecks = []string{"INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"}
+
+// ExcessPrivileges implements source.PrivilegeProbe.
+func (s *Source) ExcessPrivileges(ctx context.Context) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT priv FROM unnest($1::text[]) AS priv
+		 WHERE has_table_privilege(current_user, format('%I.%I', $2::text, $3::text), priv)`,
+		excessPrivilegeChecks, s.schema, s.table)
+	if err != nil {
+		return nil, fmt.Errorf("probe privileges: %w", err)
+	}
+	defer rows.Close()
+	var excess []string
+	for rows.Next() {
+		var priv string
+		if err := rows.Scan(&priv); err != nil {
+			return nil, fmt.Errorf("probe privileges: %w", err)
+		}
+		excess = append(excess, priv)
+	}
+	return excess, rows.Err()
 }

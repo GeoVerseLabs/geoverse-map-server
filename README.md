@@ -76,6 +76,11 @@ assets:
   max_file_size_mb: 8192
   max_memory_file_size_mb: 256  # GeoJSON / GeoPackage 的内存加载上限
 
+data_sources:
+  allowed_schemas: [gis]     # PostGIS/MySQL 只读 schema 白名单，与账号权限独立
+  allowed_tables: [gis.roads, gis.warehouse]
+  require_readonly_role: true  # 仅影响 -doctor：探测账号是否持有超出 SELECT 的权限
+
 sources:
   - name: roads              # PostGIS 动态矢量切片
     type: postgis
@@ -112,6 +117,13 @@ EPSG:4326 与 EPSG:3857 图层（3857 自动转 4326）。
 显式启用根目录限制和两个大小上限。文件路径仍按进程工作目录解析，`assets.root` 只作为
 允许边界。PMTiles 原始归档的每次 Range 请求都会重新检查文件身份，防止运行中符号链接
 被替换后越界读取。
+
+省略 `data_sources` 或两个列表都留空同样保持兼容行为（DSN 账号能读到的表都可注册），
+`-doctor` 会提醒。allowlist 只拦截"注册到了错误的表"这类配置失误，不是权限机制——
+真正的安全边界仍是 DSN 账号自身的 GRANT；`require_readonly_role: true` 时 `-doctor`
+额外探测账号在目标表上是否持有超出 SELECT 的权限，探测本身失败（部分托管数据库限制
+权限目录查询）只作提示，不算 warning。生产环境的最小权限建库脚本见
+[DEPLOY.md 九节](DEPLOY.md)。
 
 ### 部署诊断
 

@@ -83,6 +83,18 @@ type ArchiveSource interface {
 	ArchiveContentType() string
 }
 
+// PrivilegeProbe is implemented by database-backed sources that can report
+// whether the account they connect with holds privileges beyond read-only
+// on the configured table. It backs `-doctor`'s optional
+// data_sources.require_readonly_role check; a returned error means the
+// probe itself could not run (e.g. the account lacks rights to query the
+// privilege catalog), which doctor treats as informational rather than a
+// warning — many managed databases restrict catalog access even for
+// legitimate limited accounts.
+type PrivilegeProbe interface {
+	ExcessPrivileges(ctx context.Context) ([]string, error)
+}
+
 // FeatureQuery holds OGC API - Features query parameters.
 type FeatureQuery struct {
 	// BBox in WGS84 (west, south, east, north); nil = no filter.
