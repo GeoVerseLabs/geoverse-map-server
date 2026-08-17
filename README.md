@@ -335,7 +335,9 @@ docker run -p 8080:8080 \
 ```
 
 systemd、Kubernetes、nginx 反代、可观测与升级回滚见 **[DEPLOY.md](DEPLOY.md)**；
-现成配置在 [`deploy/`](deploy/)。
+现成配置在 [`deploy/`](deploy/)。基础镜像 digest 固定、SBOM/许可证/漏洞扫描
+与 Docker Hub 发布流程见 DEPLOY.md 七、八节——**Docker Hub 发布链路已搭好但
+尚未执行过真实发布**，目前仍需自行 `make docker` 构建本地镜像。
 
 > 两个探针（`/health`、`/readyz`）**豁免 API Key**——负载均衡器无法携带密钥，
 > 而它们只报数据源存活、不返回数据。`/metrics` 与 `/admin/*` 则要求鉴权，

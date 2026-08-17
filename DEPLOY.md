@@ -255,7 +255,83 @@ curl -X DELETE -H "X-API-Key: $KEY" localhost:8080/admin/cache   # 清旧切片
 
 ---
 
-## 七、生产清单
+## 七、供应链：镜像 digest / SBOM / 许可证 / 漏洞扫描
+
+### 基础镜像 digest
+
+`Dockerfile` 两处 `FROM` 都固定到具体 digest（`golang:1.25-alpine@sha256:...`、
+`alpine:3.20@sha256:...`），不是浮动 tag——同一份 Dockerfile 今天和一年后构建
+出的基础层字节完全一致，不会因为上游重新推送同一 tag 而悄悄变化。
+
+**代价**：固定 digest 之后，基础镜像的安全补丁不会自动到达，必须有人定期
+复核并手动升级。约定复核周期：**至少每季度一次**，或收到 CVE 通知时；升级
+步骤：
+
+```bash
+# 取当前 tag 对应的最新 digest（示例：golang:1.25-alpine）
+docker pull golang:1.25-alpine
+docker inspect --format='{{index .RepoDigests 0}}' golang:1.25-alpine
+# 把 Dockerfile 里对应 FROM 行的 sha256 换成新值，注释同步改复核日期
+```
+
+alpine 基础镜像同理。两处改动应在同一次提交里完成，避免 build/runtime 两阶段
+用不同批次的补丁。
+
+### SBOM / 许可证 / 漏洞扫描（CI，观测模式）
+
+`.github/workflows/ci.yml` 新增三个作业，**均不阻断构建**——这是这些工具第一次
+跑在本仓库上，先建立基线再决定失败阈值，避免把工具引入当天的存量问题直接变成
+发布停摆：
+
+| 作业 | 产出 | 工具 |
+|---|---|---|
+| `supply-chain` → SBOM | `sbom.spdx.json`（SPDX JSON）| [syft](https://github.com/anchore/syft) |
+| `supply-chain` → 漏洞扫描 | `trivy-report.json`（CRITICAL/HIGH/MEDIUM）| [trivy](https://github.com/aquasecurity/trivy) |
+| `licenses` | `licenses.csv`（Go 依赖许可证清单）| [go-licenses](https://github.com/google/go-licenses) |
+
+三份产物都作为 CI artifact 上传（保留 90 天），在 Actions 运行页面的
+"Artifacts" 区下载。首批报告出来后，用户应过一遍：
+
+- 漏洞报告里 CRITICAL/HIGH 是否都有可用修复版本（有则升级依赖，无则记录接受
+  的风险）；
+- 许可证清单里有没有与本项目分发方式冲突的许可证（例如强 copyleft）；
+- 确认基线之后，再决定是否给 CI 加真正的失败阈值（例如"仅 CRITICAL 且有可用
+  修复版本时阻断"），以及许可证黑名单。这一步是新的用户决策点，本轮实施
+  只到"能看见问题"为止，不代为设定阻断标准。
+
+## 八、Docker Hub 发布
+
+镜像发布链路（构建 → 打标签 → 推送）已在 CI 里搭好，但**本仓库尚未执行过一次
+真实的 `docker push`**——这一步需要仓库所有者在 GitHub 配置好 Docker Hub 凭据
+后才会真正跑：
+
+1. 在 Docker Hub 创建仓库 `geoverselabs/geoverse-map-server`（或替换成实际
+   使用的命名空间——这里假设复用本仓库的 GitHub 组织名 `GeoVerseLabs`，
+   Docker Hub 命名空间必须全小写）。
+2. GitHub 仓库 Settings → Secrets and variables → Actions，新增两个 secret：
+   `DOCKERHUB_USERNAME`、`DOCKERHUB_TOKEN`（Docker Hub 账号设置里生成
+   Access Token，不要用账号密码）。
+3. `.github/workflows/docker-publish.yml`（见仓库根目录）在推送 `v*` 格式的
+   git tag（如 `v1.2.3`）时触发，用 `docker/metadata-action` 派生三个标签并
+   推送：`1.2.3`、`1.2`（不含 patch，滚动指向该 minor 最新 patch）、`latest`
+   ——**Docker Hub 标签本身不带 `v` 前缀**，这是 metadata-action 对 semver
+   类型的默认行为，git tag 侧的 `v` 前缀只是本仓库沿用的常见 tag 命名习惯。
+   未配置上述两个 secret 时，工作流会在登录步骤失败，不会推送残缺镜像。
+4. 首次发布前建议本地手动跑一遍（需要本机登录 Docker Hub）：
+
+   ```bash
+   docker build --build-arg VERSION=1.2.3 -t geoverselabs/geoverse-map-server:1.2.3 .
+   docker run --rm geoverselabs/geoverse-map-server:1.2.3 -version
+   docker push geoverselabs/geoverse-map-server:1.2.3   # 确认无误后再打 git tag v1.2.3 触发 CI
+   ```
+
+镜像标签与 `main.version`（`-ldflags -X main.version=...`，由 Dockerfile 的
+`ARG VERSION` 注入）保持一致，`geoverse -version` 输出即可核对线上镜像对应
+的源码版本。
+
+---
+
+## 九、生产清单
 
 - [ ] `geoverse -doctor` 无资产边界或大小上限警告
 - [ ] `geoverse -validate` 退出码 0
@@ -266,7 +342,5 @@ curl -X DELETE -H "X-API-Key: $KEY" localhost:8080/admin/cache   # 清旧切片
 - [ ] 数据卷只读挂载；磁盘缓存有独立可写卷且设了 `max_size_mb`
 - [ ] 抓 `/metrics`，至少对 `geoverse_source_up` 告警
 - [ ] 日志轮转（compose 已配 `max-size`/`max-file`）
-
-尚未完成、生产前需自行评估的项（路线图 S3）：**基础镜像 digest 固定**、
-**SBOM 与漏洞扫描**、**性能基准（冷启动 / RSS / 热点切片 QPS）**——见
-`claude pm/GEOVERSE_MAP_SERVER_ROADMAP.md` S3 节。
+- [ ] 基础镜像 digest 复核未超过一个季度（见七节）
+- [ ] 最近一次 SBOM/许可证/漏洞扫描 artifact 已过一遍（见七节）

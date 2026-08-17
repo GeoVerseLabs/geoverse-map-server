@@ -39,3 +39,52 @@ jobs:
           -v "$PWD:/work:ro" -w /work
           geoverse-map-server:ci
           -doctor -format json -config config.example.yaml
+
+  # Supply-chain visibility. Deliberately observe-only for now: this is the
+  # first time these tools run against this repo, so the job reports what
+  # it finds without failing the build. See DEPLOY.md "供应链: SBOM / 许可
+  # 证 / 漏洞扫描" for the review cadence and how a future failure
+  # threshold would be introduced once a baseline exists.
+  supply-chain:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: docker build
+        run: docker build -t geoverse-map-server:ci .
+      - name: SBOM (SPDX JSON via syft)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          anchore/syft:latest docker:geoverse-map-server:ci -o spdx-json
+          > sbom.spdx.json
+      - name: vulnerability scan (trivy, report-only)
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:latest image --format json
+          --severity CRITICAL,HIGH,MEDIUM geoverse-map-server:ci
+          > trivy-report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-reports
+          path: |
+            sbom.spdx.json
+            trivy-report.json
+          retention-days: 90
+
+  licenses:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: go-licenses report (observe-only)
+        run: |
+          go install github.com/google/go-licenses@latest
+          go-licenses report ./cmd/geoverse > licenses.csv || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: third-party-licenses
+          path: licenses.csv
+          retention-days: 90

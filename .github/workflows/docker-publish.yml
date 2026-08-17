@@ -1,0 +1,69 @@
+name: Docker Hub publish
+
+# Fires on version tags (v1.2.3). Does nothing on ordinary pushes or PRs —
+# publishing an image is a release action, not a build-verification one;
+# CI's own `docker` job already builds and smoke-tests every push.
+#
+# Requires two repository secrets that are NOT configured by this change:
+#   DOCKERHUB_USERNAME  — Docker Hub account name
+#   DOCKERHUB_TOKEN     — Docker Hub access token (Account Settings ->
+#                          Security -> New Access Token; not the account
+#                          password)
+# Without them the login step fails and nothing gets pushed — there is no
+# partial/broken-image push path. See DEPLOY.md "八、Docker Hub 发布" for
+# the one-time setup and the pre-tag manual verification this replaces.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: geoverselabs/geoverse-map-server
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Docker Hub metadata (tags/labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # steps.meta.outputs.version ("1.2.3"), not github.ref_name
+          # ("v1.2.3") — main.version should match the pushed tags exactly,
+          # since DEPLOY.md tells operators to cross-check them via
+          # `geoverse -version`.
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: smoke-test the pushed image
+        # steps.meta.outputs.version, not github.ref_name: metadata-action's
+        # semver tag type strips the git tag's "v" prefix (v1.2.3 -> 1.2.3),
+        # so github.ref_name ("v1.2.3") was never actually pushed.
+        run: |
+          docker run --rm "${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}" -version
