@@ -20,6 +20,7 @@
 
 ```bash
 make build                                # 产出 bin/geoverse（静态二进制）
+./bin/geoverse -doctor -config config.example.yaml
 ./bin/geoverse -config config.example.yaml
 ```
 
@@ -69,6 +70,12 @@ curl http://localhost:8080/wmts/1.0.0/WMTSCapabilities.xml
 server:
   port: 8080
 
+assets:
+  root: ./data               # 允许读取本地数据文件的目录；不重写 source.path
+  enforce_root: true         # 拒绝目录外路径及符号链接逃逸
+  max_file_size_mb: 8192
+  max_memory_file_size_mb: 256  # GeoJSON / GeoPackage 的内存加载上限
+
 sources:
   - name: roads              # PostGIS 动态矢量切片
     type: postgis
@@ -100,6 +107,26 @@ sources:
 
 SRID/主键/属性列在 PostGIS、MySQL 源上可省略，服务会自动探测；GeoPackage 支持
 EPSG:4326 与 EPSG:3857 图层（3857 自动转 4326）。
+
+省略 `assets` 或关闭 `enforce_root` 会保留旧配置的路径行为，便于平滑升级；生产环境建议
+显式启用根目录限制和两个大小上限。文件路径仍按进程工作目录解析，`assets.root` 只作为
+允许边界。PMTiles 原始归档的每次 Range 请求都会重新检查文件身份，防止运行中符号链接
+被替换后越界读取。
+
+### 部署诊断
+
+`-doctor` 对完整配置执行只读诊断，`-inspect` 只检查指定数据源（或 `all`）。两者支持
+稳定的文本与 JSON 输出；警告退出 0，配置或数据源错误退出 1，CLI 用法错误退出 2：
+
+```bash
+geoverse -doctor -config config.yaml
+geoverse -doctor -format json -config config.yaml
+geoverse -inspect cities -format json -config config.yaml
+geoverse -inspect all -config config.yaml
+```
+
+诊断会报告本地资产的规范化路径、大小、数据源能力与瓦片/要素元数据；数据库错误中的
+DSN 密码会脱敏。它不启动 HTTP 监听，也不修改配置或数据。
 
 ### 数据源 WebUI
 

@@ -180,6 +180,12 @@ cache:
   max_entries: 10000
   ttl: 5m
 
+assets:
+  root: ./data
+  enforce_root: true
+  max_file_size_mb: 8192
+  max_memory_file_size_mb: 256
+
 sources:
   - name: roads            # PostGIS 动态矢量切片
     type: postgis
@@ -220,11 +226,21 @@ sources:
 
 PostGIS 的 `id_column` 可配置 UUID/text 主键用于 OGC Features 单要素寻址，并作为普通 MVT 属性输出；只有 `smallint`/`integer`/`bigint` 列会写入 MVT 原生 feature id。动态瓦片查询会先把带 buffer 的 Web Mercator envelope 裁到全球合法范围，再变换到源 SRID，避免低 zoom 边缘瓦片跨反经线后查询到相反半球。
 
+`assets` 为 GeoJSON、GeoPackage、MBTiles 与 PMTiles 提供统一文件边界。`root` 是规范化
+后的允许目录而非路径基准；实现会解析符号链接、拒绝非普通文件，并分别限制流式归档与
+整文件入内存的数据源。未配置时保持历史兼容行为，由 `geoverse -doctor` 给出警告。
+PMTiles Archive 每次请求重新打开并复核文件身份，避免服务启动后链接目标被替换。
+
+CLI 诊断位于 `internal/diagnostics`：`-doctor` 检查完整部署，`-inspect <name|all>` 输出
+选定源的资产、能力与元数据。`-format json` 使用带 `schemaVersion` 的稳定报告；诊断只读，
+警告不改变退出码，错误退出 1。
+
 ## 7. 代码布局
 
 ```
 cmd/geoverse/            入口（flag 解析、优雅退出）
 internal/config/         YAML 配置解析与校验
+internal/diagnostics/    doctor / inspect 只读诊断与文本、JSON 输出
 internal/tilemath/       Web Mercator 切片数学（z/x/y ↔ bbox）
 internal/cache/          两级缓存（内存 LRU + 磁盘持久层）
 internal/mcpserver/      MCP 端点（JSON-RPC / Streamable HTTP）

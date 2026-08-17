@@ -12,9 +12,12 @@ GeoVerse Map Server 是**单个静态二进制**（纯 Go、`CGO_ENABLED=0`）�
 ## 0. 部署前自检
 
 ```bash
+geoverse -doctor -config /etc/geoverse/config.yaml
 geoverse -validate -config /etc/geoverse/config.yaml
 ```
 
+`-doctor` 输出资产路径、大小、数据源能力和兼容模式警告；生产部署应确保没有
+`assets.root_not_enforced` 或无限大小警告。可用 `-format json` 接入 CI。
 `-validate` 不止解析 YAML——它会**真正打开每一个数据源并 ping 一遍**，然后退出。
 退出码 0 即「这份配置可以上线」。少了这一步，配置写错的代价是等到容器起来、
 探针失败、再去翻日志。CI 与 systemd 的 `ExecStartPre` 都应该跑它。
@@ -254,6 +257,7 @@ curl -X DELETE -H "X-API-Key: $KEY" localhost:8080/admin/cache   # 清旧切片
 
 ## 七、生产清单
 
+- [ ] `geoverse -doctor` 无资产边界或大小上限警告
 - [ ] `geoverse -validate` 退出码 0
 - [ ] 开启 `auth.enabled` 且密钥来自环境变量，不写在 `config.yaml` 里
 - [ ] 前置 TLS；`/metrics` 与 `/admin/*` 不对公网开放
