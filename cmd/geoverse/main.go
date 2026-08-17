@@ -8,17 +8,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/cache"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/config"
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/diagnostics"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/server"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source/registry"
 )
@@ -26,27 +29,75 @@ import (
 var version = "dev" // injected via -ldflags "-X main.version=..."
 
 func main() {
-	configPath := flag.String("config", "config.yaml", "path to YAML configuration")
-	showVersion := flag.Bool("version", false, "print version and exit")
-	validate := flag.Bool("validate", false, "load config, open every source, then exit (0 = deployable)")
-	flag.Parse()
+	os.Exit(runCLI(os.Args[1:], os.Stdout, os.Stderr))
+}
 
-	if *showVersion {
-		fmt.Println("geoverse", version)
-		return
+func runCLI(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("geoverse", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	configPath := fs.String("config", "config.yaml", "path to YAML configuration")
+	showVersion := fs.Bool("version", false, "print version and exit")
+	validate := fs.Bool("validate", false, "load config, open every source, then exit (0 = deployable)")
+	doctor := fs.Bool("doctor", false, "run read-only deployment diagnostics and exit")
+	inspect := fs.String("inspect", "", "inspect one configured source by name, or all")
+	format := fs.String("format", "text", "diagnostic output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return 2
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "unexpected arguments: %s\n", strings.Join(fs.Args(), " "))
+		return 2
+	}
+	modes := 0
+	for _, selected := range []bool{*showVersion, *validate, *doctor, *inspect != ""} {
+		if selected {
+			modes++
+		}
+	}
+	if modes > 1 {
+		fmt.Fprintln(stderr, "choose only one of -version, -validate, -doctor or -inspect")
+		return 2
+	}
+	if *format != "text" && *format != "json" {
+		fmt.Fprintf(stderr, "invalid -format %q (want text or json)\n", *format)
+		return 2
+	}
+	if *format != "text" && !*doctor && *inspect == "" {
+		fmt.Fprintln(stderr, "-format is only valid with -doctor or -inspect")
+		return 2
+	}
+	if *showVersion {
+		fmt.Fprintln(stdout, "geoverse", version)
+		return 0
+	}
+	log := slog.New(slog.NewTextHandler(stderr, nil))
 	if *validate {
 		if err := validateConfig(*configPath, log); err != nil {
 			log.Error("config invalid", "error", err)
-			os.Exit(1)
+			return 1
 		}
-		return
+		return 0
+	}
+	if *doctor || *inspect != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		var report diagnostics.Report
+		if *doctor {
+			report = diagnostics.Doctor(ctx, *configPath)
+		} else {
+			report = diagnostics.Inspect(ctx, *configPath, *inspect)
+		}
+		if err := diagnostics.Write(stdout, report, *format); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		return report.ExitCode()
 	}
 	if err := run(*configPath, log); err != nil {
 		log.Error("fatal", "error", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // validateConfig parses the config and actually opens every source, then
