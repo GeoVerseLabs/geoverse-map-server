@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/GeoVerseLabs/geoverse-map-server/internal/source"
 )
 
 // handleLanding serves GET / (OGC API landing page).
@@ -96,7 +98,7 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 			e.Items = fmt.Sprintf("%s/collections/%s/items", base, name)
 		}
 		if raw, ok := s.reg.Get(name); ok {
-			if _, ok := raw.(interface{ ArchivePath() string }); ok {
+			if _, ok := raw.(source.ArchiveSource); ok {
 				e.Archive = fmt.Sprintf("%s/archives/%s.pmtiles", base, name)
 			}
 		}

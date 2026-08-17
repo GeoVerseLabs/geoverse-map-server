@@ -28,6 +28,13 @@ mcp:                   # Model Context Protocol 端点（Streamable HTTP）
   enabled: false       # 开启后 LLM 智能体可通过 /mcp 发现图层、查询要素
   path: /mcp
 
+# 本地文件数据源安全边界。root 是允许目录，不改变 source.path 的相对路径语义。
+assets:
+  root: ./examples/data
+  enforce_root: true
+  max_file_size_mb: 8192          # MBTiles / PMTiles 等文件的统一上限；0 = 不限制
+  max_memory_file_size_mb: 256    # GeoJSON / GeoPackage 加载到内存前的更严格上限
+
 sources:
   # ── 数据库：PostGIS 动态矢量切片（需要 PostGIS >= 3.0）──────────
   # 与 WebUI「填入本地 PostgreSQL 示例」一致；请按本机库名/账号/表名修改。

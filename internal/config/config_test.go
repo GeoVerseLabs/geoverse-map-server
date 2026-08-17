@@ -34,6 +34,7 @@ sources:
 	}
 	if err := SaveSources(path, []Source{{
 		Name: "archive", Type: "pmtiles", Path: "./data/base.pmtiles",
+		AssetPolicy: Assets{Root: "/must-not-persist", EnforceRoot: true},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -44,6 +45,9 @@ sources:
 	text := string(raw)
 	if strings.Contains(text, "environment-secret") {
 		t.Fatal("environment API key leaked into persisted YAML")
+	}
+	if strings.Contains(text, "must-not-persist") || strings.Contains(text, "asset_policy") {
+		t.Fatal("runtime asset policy leaked into persisted YAML")
 	}
 	if !strings.Contains(text, "keep this operator comment") {
 		t.Fatal("operator comment was discarded")

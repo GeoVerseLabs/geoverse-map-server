@@ -16,6 +16,7 @@ import (
 // Config is the root of the YAML configuration.
 type Config struct {
 	Server     Server     `yaml:"server"`
+	Assets     Assets     `yaml:"assets"`
 	Cache      Cache      `yaml:"cache"`
 	Auth       Auth       `yaml:"auth"`
 	MCP        MCP        `yaml:"mcp"`
@@ -114,6 +115,10 @@ type Source struct {
 	Simplify *bool         `yaml:"simplify" json:"simplify,omitempty"` // zoom-dependent simplification, default true
 	Cache    *bool         `yaml:"cache" json:"cache,omitempty"`       // per-source cache override
 	TileTTL  time.Duration `yaml:"tile_ttl" json:"-"`                  // reserved for future per-source TTL
+
+	// AssetPolicy is attached at runtime by the registry. It must never be
+	// persisted or returned by the management API.
+	AssetPolicy Assets `yaml:"-" json:"-"`
 }
 
 var nameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -241,6 +246,9 @@ func Default() *Config {
 
 // Validate checks the configuration for structural errors.
 func (c *Config) Validate() error {
+	if err := c.Assets.Validate(); err != nil {
+		return err
+	}
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port %d out of range", c.Server.Port)
 	}

@@ -5,7 +5,6 @@ package geojsonsrc
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/paulmach/orb/geojson"
 
@@ -30,7 +29,7 @@ var (
 // New loads the GeoJSON file referenced by cfg. The file may contain a
 // FeatureCollection, a single Feature, or a bare geometry.
 func New(cfg config.Source) (*Source, error) {
-	raw, err := os.ReadFile(cfg.Path)
+	raw, _, err := cfg.AssetPolicy.ReadAsset(cfg.Path, true)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
 	}

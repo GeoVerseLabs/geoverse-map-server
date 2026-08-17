@@ -32,7 +32,11 @@ var (
 // New opens the MBTiles file referenced by cfg (read-only) and loads its
 // metadata table.
 func New(cfg config.Source) (*Source, error) {
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=query_only(1)", cfg.Path)
+	asset, err := cfg.AssetPolicy.InspectAsset(cfg.Path, false)
+	if err != nil {
+		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
+	}
+	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=query_only(1)", asset.ResolvedPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: open %s: %w", cfg.Name, cfg.Path, err)

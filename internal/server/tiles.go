@@ -8,7 +8,6 @@ import (
 	"hash/fnv"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -220,7 +219,7 @@ func (s *Server) handleArchive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("source %q is not an archive", name))
 		return
 	}
-	f, err := os.Open(archive.ArchivePath())
+	f, err := archive.OpenArchive()
 	if err != nil {
 		s.log.Error("open archive", "source", name, "error", err)
 		writeError(w, http.StatusInternalServerError, "archive is unavailable")

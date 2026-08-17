@@ -6,6 +6,7 @@ package source
 import (
 	"context"
 	"errors"
+	"os"
 
 	"github.com/paulmach/orb/geojson"
 )
@@ -75,11 +76,10 @@ type TileSource interface {
 	TileInfo() TileInfo
 }
 
-// ArchiveSource exposes the immutable archive behind a tile source. The HTTP
-// layer opens Path for each request and delegates byte-range semantics to
-// http.ServeContent; callers never receive an already-seeked shared file.
+// ArchiveSource opens an independently guarded archive handle for each HTTP
+// request. Callers never share the TileSource's seek cursor.
 type ArchiveSource interface {
-	ArchivePath() string
+	OpenArchive() (*os.File, error)
 	ArchiveContentType() string
 }
 

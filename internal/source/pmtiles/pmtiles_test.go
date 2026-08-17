@@ -116,7 +116,12 @@ func TestSourceReadsHeaderMetadataAndTile(t *testing.T) {
 	if _, err := s.Tile(t.Context(), 1, 0, 0); err != source.ErrTileNotFound {
 		t.Fatalf("missing tile error = %v", err)
 	}
-	if s.ArchivePath() != path || s.ArchiveContentType() != "application/vnd.pmtiles" {
+	archive, err := s.OpenArchive()
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive.Close()
+	if s.ArchiveContentType() != "application/vnd.pmtiles" {
 		t.Fatal("archive distribution metadata is wrong")
 	}
 }

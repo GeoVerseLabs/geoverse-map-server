@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -355,6 +356,54 @@ func TestPMTilesXYZAndRangeArchive(t *testing.T) {
 	}
 }
 
+func TestPMTilesArchiveRejectsSymlinkEscapeAfterStartup(t *testing.T) {
+	root := t.TempDir()
+	inside := testPMTiles(t)
+	insideCopy := filepath.Join(root, "inside.pmtiles")
+	raw, err := os.ReadFile(inside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(insideCopy, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "archive.pmtiles")
+	if err := os.Symlink(insideCopy, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("symlink creation unavailable on this Windows host: %v", err)
+		}
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.Assets = config.Assets{Root: root, EnforceRoot: true}
+	cfg.Sources = []config.Source{{Name: "archive", Type: "pmtiles", Path: link}}
+	reg, err := registry.Build(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reg.Close)
+	srv := New(cfg, reg, nil, slog.Default())
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	outside := testPMTiles(t)
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(ts.URL + "/archives/archive.pmtiles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("archive after symlink escape: status=%d, want 500", resp.StatusCode)
+	}
+}
+
 func TestManagedWebUIAndSourceLifecycle(t *testing.T) {
 	dir := t.TempDir()
 	firstPath := filepath.Join(dir, "first.geojson")
@@ -365,7 +414,7 @@ func TestManagedWebUIAndSourceLifecycle(t *testing.T) {
 		}
 	}
 	configPath := filepath.Join(dir, "config.yaml")
-	body := "server:\n  port: 8080\nsources:\n  - name: first\n    type: geojson\n    path: " + firstPath + "\n"
+	body := "server:\n  port: 8080\nassets:\n  root: " + dir + "\n  enforce_root: true\n  max_file_size_mb: 4\n  max_memory_file_size_mb: 2\nsources:\n  - name: first\n    type: geojson\n    path: " + firstPath + "\n"
 	if err := os.WriteFile(configPath, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -436,6 +485,23 @@ func TestManagedWebUIAndSourceLifecycle(t *testing.T) {
 	}
 	if len(persisted.Sources) != 2 {
 		t.Fatalf("persisted sources = %+v", persisted.Sources)
+	}
+
+	outsidePath := filepath.Join(t.TempDir(), "outside.geojson")
+	if err := os.WriteFile(outsidePath, []byte(testGeoJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	payload = []byte(`{"name":"outside","type":"geojson","path":` + strconv.Quote(outsidePath) + `}`)
+	resp, err = http.Post(ts.URL+"/admin/sources", "application/json", bytes.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("outside-root source status = %d, want 400", resp.StatusCode)
+	}
+	if _, ok := reg.Get("outside"); ok {
+		t.Fatal("outside-root source was added to registry")
 	}
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/admin/sources/second", nil)

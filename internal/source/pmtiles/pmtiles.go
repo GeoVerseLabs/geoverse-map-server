@@ -59,12 +59,13 @@ type directoryEntry struct {
 
 // Source serves one immutable PMTiles v3 archive.
 type Source struct {
-	name string
-	path string
-	file *os.File
-	head header
-	root []directoryEntry
-	info source.TileInfo
+	name   string
+	path   string
+	assets config.Assets
+	file   *os.File
+	head   header
+	root   []directoryEntry
+	info   source.TileInfo
 }
 
 var (
@@ -75,11 +76,11 @@ var (
 
 // New opens and validates a local PMTiles v3 archive.
 func New(cfg config.Source) (*Source, error) {
-	f, err := os.Open(cfg.Path)
+	f, _, err := cfg.AssetPolicy.OpenAsset(cfg.Path, false)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: open PMTiles: %w", cfg.Name, err)
 	}
-	s := &Source{name: cfg.Name, path: cfg.Path, file: f}
+	s := &Source{name: cfg.Name, path: cfg.Path, assets: cfg.AssetPolicy, file: f}
 	if err := s.load(cfg); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
@@ -381,9 +382,12 @@ func zxyToID(z uint8, x, y uint32) uint64 {
 	return acc + d
 }
 
-func (s *Source) Name() string               { return s.name }
-func (s *Source) TileInfo() source.TileInfo  { return s.info }
-func (s *Source) ArchivePath() string        { return s.path }
+func (s *Source) Name() string              { return s.name }
+func (s *Source) TileInfo() source.TileInfo { return s.info }
+func (s *Source) OpenArchive() (*os.File, error) {
+	f, _, err := s.assets.OpenAsset(s.path, false)
+	return f, err
+}
 func (s *Source) ArchiveContentType() string { return "application/vnd.pmtiles" }
 func (s *Source) Ping(context.Context) error { _, err := s.file.Stat(); return err }
 func (s *Source) Close() error               { return s.file.Close() }

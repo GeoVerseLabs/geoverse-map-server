@@ -35,7 +35,11 @@ var (
 // cfg.Layer is empty and the package has exactly one feature table, that
 // table is used.
 func New(cfg config.Source) (*Source, error) {
-	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=query_only(1)", cfg.Path)
+	asset, err := cfg.AssetPolicy.InspectAsset(cfg.Path, true)
+	if err != nil {
+		return nil, fmt.Errorf("source %q: %w", cfg.Name, err)
+	}
+	dsn := fmt.Sprintf("file:%s?mode=ro&_pragma=query_only(1)", asset.ResolvedPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: open %s: %w", cfg.Name, cfg.Path, err)

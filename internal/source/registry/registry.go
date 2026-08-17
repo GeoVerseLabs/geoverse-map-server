@@ -34,7 +34,7 @@ type Registry struct {
 func Build(ctx context.Context, cfg *config.Config) (*Registry, error) {
 	r := &Registry{sources: map[string]source.Source{}}
 	for _, sc := range cfg.Sources {
-		s, err := Open(ctx, sc)
+		s, err := OpenWithAssets(ctx, sc, cfg.Assets)
 		if err != nil {
 			r.Close()
 			return nil, err
@@ -48,19 +48,51 @@ func Build(ctx context.Context, cfg *config.Config) (*Registry, error) {
 // Open constructs one source. Management endpoints use it to probe a
 // candidate before it is persisted or made visible to live requests.
 func Open(ctx context.Context, sc config.Source) (source.Source, error) {
+	return OpenWithAssets(ctx, sc, config.Assets{})
+}
+
+// OpenWithAssets constructs one source under the supplied file policy.
+// Database sources ignore the policy; file-backed sources resolve and enforce
+// it inside their constructors.
+func OpenWithAssets(ctx context.Context, sc config.Source, policy config.Assets) (source.Source, error) {
+	sc.AssetPolicy = policy
 	switch sc.Type {
 	case "postgis":
-		return postgis.New(ctx, sc)
+		opened, err := postgis.New(ctx, sc)
+		if err != nil {
+			return nil, err
+		}
+		return opened, nil
 	case "mysql":
-		return mysql.New(ctx, sc)
+		opened, err := mysql.New(ctx, sc)
+		if err != nil {
+			return nil, err
+		}
+		return opened, nil
 	case "mbtiles":
-		return mbtiles.New(sc)
+		opened, err := mbtiles.New(sc)
+		if err != nil {
+			return nil, err
+		}
+		return opened, nil
 	case "pmtiles":
-		return pmtiles.New(sc)
+		opened, err := pmtiles.New(sc)
+		if err != nil {
+			return nil, err
+		}
+		return opened, nil
 	case "geojson":
-		return geojsonsrc.New(sc)
+		opened, err := geojsonsrc.New(sc)
+		if err != nil {
+			return nil, err
+		}
+		return opened, nil
 	case "geopackage":
-		return geopackage.New(sc)
+		opened, err := geopackage.New(sc)
+		if err != nil {
+			return nil, err
+		}
+		return opened, nil
 	default:
 		return nil, fmt.Errorf("unknown source type %q", sc.Type)
 	}
