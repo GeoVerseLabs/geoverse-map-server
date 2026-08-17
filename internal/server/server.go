@@ -81,6 +81,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Service metadata.
 	mux.HandleFunc("GET /{$}", s.handleLanding)
+	mux.HandleFunc("GET /api", s.handleOpenAPI)
 	mux.HandleFunc("GET /conformance", s.handleConformance)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
@@ -116,6 +117,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /collections/{id}", s.handleCollection)
 	mux.HandleFunc("GET /collections/{id}/items", s.handleItems)
 	mux.HandleFunc("GET /collections/{id}/items/{fid}", s.handleItem)
+
+	// OGC API - Tiles. Additive: XYZ (/tiles/...) and WMTS above are
+	// unaffected and stay the primary route for existing clients.
+	mux.HandleFunc("GET /tileMatrixSets", s.handleTileMatrixSets)
+	mux.HandleFunc("GET /tileMatrixSets/{id}", s.handleTileMatrixSet)
+	mux.HandleFunc("GET /collections/{id}/tiles", s.handleCollectionTileset)
+	mux.HandleFunc("GET /collections/{id}/tiles/{tms}/{tileMatrix}/{tileRow}/{tileCol}", s.handleStandardTile)
 
 	// Algorithm endpoints.
 	if s.cfg.Algorithms.On() {

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>GeoVerse Serve — OGC API - Tiles (MapLibre)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet">
+  <style>html, body, #map { margin: 0; height: 100%; }</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  // MapLibre 没有原生 OGC API - Tiles 客户端（不像 OpenLayers 的
+  // ol/source/OGCVectorTile，见 openlayers-ogc-tiles.html），需要自己先
+  // GET tileset 资源（/collections/{id}/tiles），从其 rel=item 链接模板
+  // 里取出瓦片 URL，再把 OGC 的 {tileMatrix}/{tileRow}/{tileCol} 占位符
+  // 换成 MapLibre style spec 认的 {z}/{y}/{x}（顺序一致，只是变量名不同：
+  // tileMatrix=z、tileRow=y、tileCol=x）。
+  const base = location.origin.includes('8080') ? location.origin : 'http://localhost:8080';
+
+  async function tileURLTemplate(collection) {
+    const res = await fetch(`${base}/collections/${collection}/tiles`);
+    if (!res.ok) throw new Error(`tileset request failed: ${res.status}`);
+    const tileset = await res.json();
+    const itemLink = tileset.links.find((l) => l.rel === 'item');
+    if (!itemLink) throw new Error('tileset has no rel=item tile template link');
+    return itemLink.href
+      .replace('{tileMatrix}', '{z}')
+      .replace('{tileRow}', '{y}')
+      .replace('{tileCol}', '{x}');
+  }
+
+  tileURLTemplate('cities').then((tiles) => {
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          cities: { type: 'vector', tiles: [tiles], minzoom: 0, maxzoom: 22 },
+        },
+        layers: [
+          { id: 'bg', type: 'background', paint: { 'background-color': '#aad3df' } },
+          {
+            id: 'cities', type: 'circle', source: 'cities', 'source-layer': 'cities',
+            paint: { 'circle-radius': 6, 'circle-color': '#c0392b', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff' },
+          },
+        ],
+      },
+      center: [110, 33],
+      zoom: 3,
+    });
+    map.addControl(new maplibregl.NavigationControl());
+    map.on('click', 'cities', (e) => {
+      const p = e.features[0].properties;
+      new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<b>${p.name}</b>`).addTo(map);
+    });
+  }).catch((err) => {
+    document.body.innerHTML = `<pre style="padding:1em;color:#c0392b">${err}</pre>`;
+  });
+</script>
+</body>
+</html>

@@ -13,12 +13,15 @@ func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
 	base := s.baseURL(r)
 	writeJSON(w, http.StatusOK, "application/json", map[string]interface{}{
 		"title":       "GeoVerse Map Server",
-		"description": "Lightweight geospatial data distribution: vector tiles, OGC API - Features, WMTS",
+		"description": "Lightweight geospatial data distribution: vector tiles, OGC API - Features, OGC API - Tiles, WMTS",
 		"version":     Version,
 		"links": []link{
-			{Href: base + "/", Rel: "self", Type: "application/json", Title: "this document"},
-			{Href: base + "/conformance", Rel: "conformance", Type: "application/json"},
-			{Href: base + "/collections", Rel: "data", Type: "application/json", Title: "feature collections"},
+			selfLink(base+"/", "application/json"),
+			serviceDescLink(base),
+			serviceDocLink(base),
+			conformanceLink(base),
+			dataLink(base),
+			{Href: base + "/tileMatrixSets", Rel: "http://www.opengis.net/def/rel/ogc/1.0/tiling-schemes", Type: "application/json", Title: "supported tile matrix sets"},
 			{Href: base + "/catalog", Rel: "catalog", Type: "application/json", Title: "all layers"},
 			{Href: base + "/admin/", Rel: "service", Type: "text/html", Title: "data source management WebUI"},
 			{Href: base + "/algorithms", Rel: "algorithms", Type: "application/json", Title: "spatial algorithms"},
@@ -30,14 +33,11 @@ func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleConformance serves GET /conformance.
+// handleConformance serves GET /conformance. Every URI here must be backed
+// by a passing check in conformance_test.go — see conformance.go.
 func (s *Server) handleConformance(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, "application/json", map[string]interface{}{
-		"conformsTo": []string{
-			"http://www.opengis.net/spec/ogcapi-common-1/1.0/conf/core",
-			"http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/core",
-			"http://www.opengis.net/spec/ogcapi-features-1/1.0/conf/geojson",
-		},
+		"conformsTo": declaredConformance,
 	})
 }
 
@@ -74,6 +74,7 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 		Title    string            `json:"title,omitempty"`
 		Tiles    string            `json:"tiles,omitempty"`
 		TileJSON string            `json:"tilejson,omitempty"`
+		Tileset  string            `json:"tileset,omitempty"`
 		Archive  string            `json:"archive,omitempty"`
 		Items    string            `json:"items,omitempty"`
 		Format   string            `json:"format,omitempty"`
@@ -93,6 +94,10 @@ func (s *Server) handleCatalog(w http.ResponseWriter, r *http.Request) {
 			e.Tiles = fmt.Sprintf("%s/tiles/%s/{z}/{x}/{y}.%s", base, name, info.Format)
 			e.TileJSON = fmt.Sprintf("%s/tiles/%s.json", base, name)
 			e.Zooms = map[string]int{"min": info.MinZoom, "max": info.MaxZoom}
+			// OGC API - Tiles addresses every tile layer under /collections,
+			// including tile-only sources (e.g. a raw PMTiles archive) that
+			// have no OGC API - Features collection of their own.
+			e.Tileset = fmt.Sprintf("%s/collections/%s/tiles", base, name)
 		}
 		if _, ok := s.reg.FeatureSource(name); ok {
 			e.Items = fmt.Sprintf("%s/collections/%s/items", base, name)

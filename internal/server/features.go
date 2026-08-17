@@ -25,10 +25,20 @@ type link struct {
 	Title string `json:"title,omitempty"`
 }
 
-func collectionDoc(base string, ci source.CollectionInfo) map[string]interface{} {
+func collectionDoc(base string, ci source.CollectionInfo, hasTiles bool) map[string]interface{} {
 	title := ci.Title
 	if title == "" {
 		title = ci.Name
+	}
+	links := []link{
+		{Href: fmt.Sprintf("%s/collections/%s", base, ci.Name), Rel: "self", Type: "application/json"},
+		{Href: fmt.Sprintf("%s/collections/%s/items", base, ci.Name), Rel: "items", Type: geoJSONType, Title: title},
+	}
+	if hasTiles {
+		links = append(links, link{
+			Href: fmt.Sprintf("%s/collections/%s/tiles", base, ci.Name), Rel: "tiles",
+			Type: "application/json", Title: "OGC API - Tiles tileset for this collection",
+		})
 	}
 	return map[string]interface{}{
 		"id":          ci.Name,
@@ -42,10 +52,7 @@ func collectionDoc(base string, ci source.CollectionInfo) map[string]interface{}
 		},
 		"itemType": "feature",
 		"crs":      []string{"http://www.opengis.net/def/crs/OGC/1.3/CRS84"},
-		"links": []link{
-			{Href: fmt.Sprintf("%s/collections/%s", base, ci.Name), Rel: "self", Type: "application/json"},
-			{Href: fmt.Sprintf("%s/collections/%s/items", base, ci.Name), Rel: "items", Type: geoJSONType, Title: title},
-		},
+		"links":    links,
 	}
 }
 
@@ -54,7 +61,9 @@ func (s *Server) handleCollections(w http.ResponseWriter, r *http.Request) {
 	base := s.baseURL(r)
 	var cols []map[string]interface{}
 	for _, fs := range s.reg.FeatureSources() {
-		cols = append(cols, collectionDoc(base, fs.CollectionInfo()))
+		ci := fs.CollectionInfo()
+		_, hasTiles := s.reg.TileSource(ci.Name)
+		cols = append(cols, collectionDoc(base, ci, hasTiles))
 	}
 	writeJSON(w, http.StatusOK, "application/json", map[string]interface{}{
 		"collections": cols,
@@ -72,7 +81,8 @@ func (s *Server) handleCollection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("unknown collection %q", id))
 		return
 	}
-	writeJSON(w, http.StatusOK, "application/json", collectionDoc(s.baseURL(r), fs.CollectionInfo()))
+	_, hasTiles := s.reg.TileSource(id)
+	writeJSON(w, http.StatusOK, "application/json", collectionDoc(s.baseURL(r), fs.CollectionInfo(), hasTiles))
 }
 
 func parseBBox(v string) (*[4]float64, error) {

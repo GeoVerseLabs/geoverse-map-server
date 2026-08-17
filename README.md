@@ -161,7 +161,8 @@ GeoJSON、MBTiles、PMTiles 与 GeoPackage：
 | 端点 | 说明 |
 |---|---|
 | `GET /` | 服务元数据（OGC API landing page）|
-| `GET /conformance` | OGC API 一致性声明 |
+| `GET /api` | OpenAPI 3.0 服务描述（`Accept: application/json` 或 `?f=json` 取 JSON，默认 YAML）|
+| `GET /conformance` | OGC API 一致性声明（每条都有自动化测试背书，见 [docs/CONFORMANCE.md](docs/CONFORMANCE.md)）|
 | `GET /health` | 健康检查（逐数据源，每次重新 ping）|
 | `GET /readyz` | 就绪探针（结果缓存 5s，供编排器高频探活）|
 | `GET /metrics` | Prometheus 文本格式指标 |
@@ -181,10 +182,17 @@ GeoJSON、MBTiles、PMTiles 与 GeoPackage：
 | `GET /collections/{id}` | 集合描述 |
 | `GET /collections/{id}/items?bbox=&limit=&offset=` | 要素查询（GeoJSON）|
 | `GET /collections/{id}/items/{fid}` | 单要素 |
+| `GET /tileMatrixSets` | 支持的 TileMatrixSet 列表（目前仅 WebMercatorQuad）|
+| `GET /tileMatrixSets/{id}` | TileMatrixSet 定义（0-24 级）|
+| `GET /collections/{id}/tiles` | OGC API - Tiles tileset 元数据（边界、zoom 范围、瓦片 URL 模板）|
+| `GET /collections/{id}/tiles/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}` | OGC API - Tiles 标准取瓦片路由；与上面的 XYZ 路由共用同一份瓦片数据，同一 z/x/y 字节完全一致 |
 | `GET /algorithms` | 空间算法清单（自描述 JSON Schema）|
 | `POST /algorithms/{name}` | 执行算法（shortest_path / isochrone / map_match / dbscan）|
 
 切片坐标体系为 WebMercatorQuad（EPSG:3857）。空白区域切片返回 `204 No Content`。
+标准 OGC API - Tiles 路由是 XYZ 路由之外**新增**的入口，不是替代——现有
+`/tiles/{layer}/{z}/{x}/{y}.{ext}` 与 `/wmts/...` 客户端不受影响。
+`examples/clients/` 下有 OpenLayers 与 MapLibre 两个消费该路由的示例。
 
 ## 缓存
 

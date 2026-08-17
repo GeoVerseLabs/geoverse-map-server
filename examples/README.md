@@ -27,6 +27,25 @@ make build
 - **WMTS**：连接 `http://localhost:8080/wmts/1.0.0/WMTSCapabilities.xml`
 - **OGC API - Features**：连接 `http://localhost:8080/`
 
+## OGC API - Tiles 客户端示例（`examples/clients/`）
+
+`examples/viewer.html` 走的是 XYZ TileJSON（`/tiles/{name}.json`）；
+`examples/clients/` 下两个示例改走标准 OGC API - Tiles 资源
+（`GET /collections/{id}/tiles` 与 `GET /collections/{id}/tiles/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}`），
+两条路由背后是同一份瓦片数据，字节级一致（见
+`internal/server/tiles_ogc_test.go` 的 `TestStandardTileMatchesXYZBytes`）：
+
+- `openlayers-ogc-tiles.html`：`ol/source/OGCVectorTile` 原生支持 OGC API -
+  Tiles，直接把 tileset URL 交给它，不需要手写瓦片 URL 模板。
+- `maplibre-ogc-tiles.html`：MapLibre 没有原生 OGC API - Tiles 客户端，示例
+  先 `fetch` tileset 资源拿到 `rel=item` 的瓦片模板链接，把 OGC 的
+  `{tileMatrix}/{tileRow}/{tileCol}` 换成 MapLibre style spec 认的
+  `{z}/{y}/{x}` 再喂给 vector source。
+
+两者都假设服务跑在 `http://localhost:8080`（`config.example.yaml` 默认端口），
+直接用浏览器打开 HTML 文件即可，未做浏览器端渲染验收，仅保证背后的 JSON
+契约（tileset 结构、瓦片模板、字节一致性）有测试覆盖。
+
 ## Docker 多数据源验收
 
 [`config.multisource.yaml`](config.multisource.yaml) 同时发布：

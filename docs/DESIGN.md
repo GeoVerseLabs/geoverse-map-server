@@ -94,8 +94,9 @@ MariaDB 11 不支持这两项扩展，因此 bbox 构造使用二参数形式，
 
 | 路径 | 说明 |
 |---|---|
-| `GET /` | Landing page：服务信息 + 全部链接 |
-| `GET /conformance` | OGC API 一致性声明 |
+| `GET /` | Landing page：服务信息 + 全部链接（`self`/`service-desc`/`service-doc`/`conformance`/`data` 等标准 rel，由 `internal/server/links.go` 统一构造）|
+| `GET /api` | OpenAPI 3.0 服务描述；`internal/server/openapi.yaml` 是唯一来源，`GET /api` 按 `Accept`/`?f=` 派生 JSON 或 YAML，两者不会互相漂移 |
+| `GET /conformance` | OGC API 一致性声明；每条 class 都有 `internal/server/conformance_test.go` 里注册的自动化证据，缺证据的声明或没声明的证据都会让测试失败，详见 [CONFORMANCE.md](CONFORMANCE.md) |
 | `GET /health` | 健康检查（含各数据源状态）|
 | `GET /catalog` | 全部图层/集合清单（便于前端发现）|
 
@@ -117,9 +118,25 @@ MariaDB 11 不支持这两项扩展，因此 bbox 构造使用二参数形式，
 | 路径 | 说明 |
 |---|---|
 | `GET /collections` | 集合列表 |
-| `GET /collections/{id}` | 集合描述（extent、links）|
+| `GET /collections/{id}` | 集合描述（extent、links；有对应瓦片图层时附 `rel=tiles` 链接）|
 | `GET /collections/{id}/items?bbox=&limit=&offset=` | 要素查询，GeoJSON FeatureCollection |
 | `GET /collections/{id}/items/{fid}` | 单要素 |
+
+### 4.4 OGC API - Tiles (Part 1: Core)
+
+| 路径 | 说明 |
+|---|---|
+| `GET /tileMatrixSets` | 支持的 TileMatrixSet 列表 |
+| `GET /tileMatrixSets/{id}` | TileMatrixSet 定义（目前仅 `WebMercatorQuad`，0-24 级，`internal/server/tilematrixsets.go` 按 OGC 公式计算而非硬编码表）|
+| `GET /collections/{id}/tiles` | Tileset 资源：边界、`tileMatrixSetLimits`、瓦片 URL 模板（`rel=item`）|
+| `GET /collections/{id}/tiles/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}` | 标准取瓦片路由 |
+
+这一节是 4.2 节 XYZ/WMTS 路由之外的**加法**，不是替代：标准路由内部直接
+调用与 XYZ 相同的 `serveTile`（`internal/server/tiles_ogc.go`），两者对同一
+z/x/y 返回字节完全一致（`TestStandardTileMatchesXYZBytes` 断言），缓存、
+ETag、gzip passthrough 行为不分叉成两套实现。路径参数刻意用
+`tileMatrix`/`tileRow`/`tileCol` 三个独立命名（对应 z/y/x），不复用 XYZ 路由
+的 `{z}/{x}/{y}` mux pattern，避免两套语义混在一起难以推理。
 
 ## 5. 缓存
 
@@ -253,6 +270,12 @@ internal/source/memengine/   内存要素引擎（MVT 编码、要素查询）
 internal/source/geojsonsrc/  GeoJSON 加载器 → memengine
 internal/source/geopackage/  GeoPackage 加载器（GPB/WKB 解析）→ memengine
 internal/server/         HTTP 服务、路由、handler、middleware、内嵌 WebUI
+internal/server/openapi.yaml      OpenAPI 3.0 文档源（GET /api 的唯一来源）
+internal/server/conformance.go    /conformance 声明的 class 常量与列表
+internal/server/conformance_test.go  声明 ↔ 证据双向校验（TestConformanceClassesHaveEvidence）
+internal/server/links.go          landing/collections/tiles 共用的标准 link 构造
+internal/server/tilematrixsets.go WebMercatorQuad TileMatrixSet 计算与端点
+internal/server/tiles_ogc.go      OGC API - Tiles tileset 资源 + 标准取瓦片路由（复用 serveTile）
 internal/algo/           算法插件框架（Algorithm/Registry/Env）
 internal/algo/network/   可路由图（多层、构图、索引、Dijkstra/A*）
 internal/algo/routing/   最短路径、等时圈、路径匹配

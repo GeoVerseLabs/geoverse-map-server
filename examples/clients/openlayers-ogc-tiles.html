@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <title>GeoVerse Serve — OGC API - Tiles (OpenLayers)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.3.1/ol.css">
+  <script src="https://cdn.jsdelivr.net/npm/ol@10.3.1/dist/ol.js"></script>
+  <style>html, body, #map { margin: 0; height: 100%; }</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  // 本示例走标准 OGC API - Tiles 资源，不是 examples/viewer.html 用的 XYZ
+  // TileJSON。ol/source/OGCVectorTile 会自己 GET tileset URL
+  // （GET /collections/{id}/tiles），解析 tileMatrixSetURI 与 tile 模板链接，
+  // 自行拼出请求——不需要手写 {z}/{x}/{y} 模板，这是它相对 MapLibre 版本
+  // （见 maplibre-ogc-tiles.html）的主要差异：MapLibre 没有原生 OGC API -
+  // Tiles 客户端，必须自己解析 tileset 文档。
+  const base = location.origin.includes('8080') ? location.origin : 'http://localhost:8080';
+
+  const source = new ol.source.OGCVectorTile({
+    url: base + '/collections/cities/tiles',
+    format: new ol.format.MVT(),
+  });
+
+  const map = new ol.Map({
+    target: 'map',
+    layers: [
+      new ol.layer.VectorTile({
+        source,
+        style: {
+          'circle-radius': 6,
+          'circle-fill-color': '#c0392b',
+          'circle-stroke-color': '#fff',
+          'circle-stroke-width': 1.5,
+        },
+      }),
+    ],
+    view: new ol.View({ center: ol.proj.fromLonLat([110, 33]), zoom: 3 }),
+  });
+
+  map.on('singleclick', (evt) => {
+    const feature = map.forEachFeatureAtPixel(evt.pixel, (f) => f);
+    if (!feature) return;
+    const props = feature.getProperties();
+    // eslint-disable-next-line no-console
+    console.log('clicked feature', props);
+  });
+</script>
+</body>
+</html>

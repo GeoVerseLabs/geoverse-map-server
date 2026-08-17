@@ -1,0 +1,159 @@
+openapi: 3.0.3
+info:
+  title: GeoVerse Map Server
+  version: dev
+  description: >-
+    OGC API - Common, OGC API - Features and OGC API - Tiles surface of this
+    service. This document intentionally does not cover the service's other
+    endpoints (XYZ tile templates, WMTS, PMTiles archive Range downloads,
+    spatial algorithms, MCP, /admin/* management) — those are this server's
+    own extensions, not OGC API resources, and are documented in
+    docs/DESIGN.md and README.md instead. See GET /conformance for the list
+    of conformance classes this document is verified against.
+servers:
+  - url: /
+paths:
+  /:
+    get:
+      operationId: getLandingPage
+      summary: Landing page
+      responses:
+        "200":
+          description: Links to this document, the conformance declaration and the data.
+  /api:
+    get:
+      operationId: getOpenapi
+      summary: This OpenAPI document
+      responses:
+        "200":
+          description: This document, as JSON or YAML depending on Accept.
+  /conformance:
+    get:
+      operationId: getConformanceDeclaration
+      summary: Conformance classes this server has passing evidence for
+      responses:
+        "200":
+          description: "{ \"conformsTo\": [ <class URI>, ... ] }"
+  /collections:
+    get:
+      operationId: getCollections
+      summary: Feature collections
+      responses:
+        "200":
+          description: The list of feature collections.
+  /collections/{collectionId}:
+    get:
+      operationId: getCollection
+      summary: A feature collection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+      responses:
+        "200": { description: Collection metadata. }
+        "404": { description: Unknown collection. }
+  /collections/{collectionId}/items:
+    get:
+      operationId: getFeatures
+      summary: Features in a collection, as GeoJSON
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+        - $ref: "#/components/parameters/bbox"
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/offset"
+      responses:
+        "200": { description: A GeoJSON FeatureCollection page. }
+        "400": { description: Invalid bbox, limit or offset. }
+        "404": { description: Unknown collection. }
+  /collections/{collectionId}/items/{featureId}:
+    get:
+      operationId: getFeature
+      summary: A single feature, as GeoJSON
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+        - name: featureId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: A GeoJSON Feature. }
+        "404": { description: Unknown collection or feature. }
+  /tileMatrixSets:
+    get:
+      operationId: getTileMatrixSets
+      summary: Supported tile matrix sets
+      responses:
+        "200": { description: List of tile matrix set links (currently WebMercatorQuad only). }
+  /tileMatrixSets/{tileMatrixSetId}:
+    get:
+      operationId: getTileMatrixSet
+      summary: A tile matrix set definition
+      parameters:
+        - name: tileMatrixSetId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: TileMatrixSet definition. }
+        "404": { description: Unknown tile matrix set. }
+  /collections/{collectionId}/tiles:
+    get:
+      operationId: getCollectionTileset
+      summary: Tileset metadata for a collection
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+      responses:
+        "200": { description: Tileset metadata — bounds, zoom limits, tile URL template. }
+        "404": { description: Layer has no tiles. }
+  /collections/{collectionId}/tiles/{tileMatrixSetId}/{tileMatrix}/{tileRow}/{tileCol}:
+    get:
+      operationId: getTile
+      summary: A single tile
+      parameters:
+        - $ref: "#/components/parameters/collectionId"
+        - name: tileMatrixSetId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: tileMatrix
+          in: path
+          required: true
+          schema: { type: string }
+        - name: tileRow
+          in: path
+          required: true
+          schema: { type: string }
+        - name: tileCol
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200": { description: Tile payload — MVT, PNG, JPEG or WebP depending on the layer. }
+        "204": { description: Tile matrix is outside the layer's configured zoom range. }
+        "404": { description: Unknown collection or tile matrix set. }
+components:
+  parameters:
+    collectionId:
+      name: collectionId
+      in: path
+      required: true
+      schema: { type: string }
+    bbox:
+      name: bbox
+      in: query
+      required: false
+      style: form
+      explode: false
+      schema:
+        type: array
+        items: { type: number }
+        minItems: 4
+        maxItems: 4
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1 }
+    offset:
+      name: offset
+      in: query
+      required: false
+      schema: { type: integer, minimum: 0 }
