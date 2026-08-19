@@ -76,7 +76,13 @@ func (m *Manager) Graph(ctx context.Context, name string) (*Graph, error) {
 	}
 	g, err := m.build(ctx, cfg)
 	if err != nil {
-		m.errs[name] = err
+		// Never cache a cancellation: it describes one caller's deadline,
+		// not whether this network is buildable. Caching it would poison
+		// the network for the lifetime of the process because of a single
+		// client that gave up.
+		if ctx.Err() == nil {
+			m.errs[name] = err
+		}
 		return nil, err
 	}
 	m.graphs[name] = g
@@ -92,7 +98,7 @@ func (m *Manager) build(ctx context.Context, cfg NetworkConfig) (*Graph, error) 
 	if err != nil {
 		return nil, fmt.Errorf("network %q: load features: %w", cfg.Name, err)
 	}
-	g, err := Build(res.Features, BuildOptions{
+	g, err := Build(ctx, res.Features, BuildOptions{
 		DefaultSpeedKMH: cfg.DefaultSpeedKMH,
 		SpeedField:      cfg.SpeedField,
 		OnewayField:     cfg.OnewayField,

@@ -16,6 +16,7 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"math"
 
@@ -136,14 +137,22 @@ type builder struct {
 }
 
 // Build constructs a Graph from LineString / MultiLineString features.
-func Build(feats []*geojson.Feature, opts BuildOptions) (*Graph, error) {
+// It returns ctx.Err() if the caller's context is cancelled: a graph over
+// maxNetworkFeatures linestrings is a single-shot but unbounded-by-request
+// CPU cost, and the caller may already have given up.
+func Build(ctx context.Context, feats []*geojson.Feature, opts BuildOptions) (*Graph, error) {
 	opts.fill()
 	b := &builder{
 		opts:  opts,
 		g:     &Graph{},
 		index: map[nodeKey]NodeID{},
 	}
-	for _, f := range feats {
+	for i, f := range feats {
+		if i%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if f == nil || f.Geometry == nil {
 			continue
 		}

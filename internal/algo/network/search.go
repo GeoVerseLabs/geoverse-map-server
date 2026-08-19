@@ -2,8 +2,19 @@ package network
 
 import (
 	"container/heap"
+	"context"
 	"math"
 )
+
+// cancelCheckInterval is how many queue pops happen between context
+// checks. http.TimeoutHandler answers the client on deadline but does not
+// stop this goroutine, so without these checks a search keeps burning CPU
+// for a request nobody is waiting for any more. Checking every pop would
+// put an atomic load in the hot loop; 1024 keeps that cost immeasurable
+// while bounding the wasted work after cancellation to well under a
+// millisecond. Mirrors algo.CancelCheckInterval, which this package
+// cannot import (algo depends on network, not the other way round).
+const cancelCheckInterval = 1024
 
 // CostFunc returns the traversal cost of an edge (seconds or meters).
 type CostFunc func(e *Edge) float64
@@ -79,13 +90,14 @@ type Seed struct {
 
 // Dijkstra explores the graph from `from` until every node cheaper than
 // cutoff is settled (cutoff <= 0 means no bound). If target >= 0 the
-// search stops as soon as the target is settled.
-func (g *Graph) Dijkstra(from NodeID, cost CostFunc, cutoff float64, target NodeID) *SearchResult {
-	return g.DijkstraSeeded([]Seed{{Node: from}}, cost, cutoff, target)
+// search stops as soon as the target is settled. It returns ctx.Err() if
+// the caller's context is cancelled mid-search.
+func (g *Graph) Dijkstra(ctx context.Context, from NodeID, cost CostFunc, cutoff float64, target NodeID) (*SearchResult, error) {
+	return g.DijkstraSeeded(ctx, []Seed{{Node: from}}, cost, cutoff, target)
 }
 
 // DijkstraSeeded is Dijkstra with multiple weighted start nodes.
-func (g *Graph) DijkstraSeeded(seeds []Seed, cost CostFunc, cutoff float64, target NodeID) *SearchResult {
+func (g *Graph) DijkstraSeeded(ctx context.Context, seeds []Seed, cost CostFunc, cutoff float64, target NodeID) (*SearchResult, error) {
 	res := newSearchResult(len(g.Nodes))
 	q := &pq{}
 	for _, s := range seeds {
@@ -94,14 +106,19 @@ func (g *Graph) DijkstraSeeded(seeds []Seed, cost CostFunc, cutoff float64, targ
 			heap.Push(q, pqItem{node: s.Node, prio: s.Cost})
 		}
 	}
-	for q.Len() > 0 {
+	for pops := 0; q.Len() > 0; pops++ {
+		if pops%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		it := heap.Pop(q).(pqItem)
 		u := it.node
 		if it.prio > res.Cost[u] {
 			continue // stale entry
 		}
 		if u == target {
-			return res
+			return res, nil
 		}
 		for _, ei := range g.Adj[u] {
 			e := &g.Edges[ei]
@@ -116,14 +133,15 @@ func (g *Graph) DijkstraSeeded(seeds []Seed, cost CostFunc, cutoff float64, targ
 			}
 		}
 	}
-	return res
+	return res, nil
 }
 
 // AStar finds the least-cost path from `from` to `to` using an admissible
 // great-circle heuristic (straight-line distance, divided by the graph's
 // maximum speed for time costs), typically settling far fewer nodes than
-// Dijkstra on road networks.
-func (g *Graph) AStar(from, to NodeID, cost CostFunc, timeBased bool) *SearchResult {
+// Dijkstra on road networks. It returns ctx.Err() if the caller's context
+// is cancelled mid-search.
+func (g *Graph) AStar(ctx context.Context, from, to NodeID, cost CostFunc, timeBased bool) (*SearchResult, error) {
 	h := func(n NodeID) float64 {
 		d := Haversine(g.Nodes[n].Pt, g.Nodes[to].Pt)
 		if timeBased {
@@ -135,7 +153,12 @@ func (g *Graph) AStar(from, to NodeID, cost CostFunc, timeBased bool) *SearchRes
 	res.Cost[from] = 0
 	q := &pq{{node: from, prio: h(from)}}
 	settled := make([]bool, len(g.Nodes))
-	for q.Len() > 0 {
+	for pops := 0; q.Len() > 0; pops++ {
+		if pops%cancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		it := heap.Pop(q).(pqItem)
 		u := it.node
 		if settled[u] {
@@ -143,7 +166,7 @@ func (g *Graph) AStar(from, to NodeID, cost CostFunc, timeBased bool) *SearchRes
 		}
 		settled[u] = true
 		if u == to {
-			return res
+			return res, nil
 		}
 		for _, ei := range g.Adj[u] {
 			e := &g.Edges[ei]
@@ -155,5 +178,5 @@ func (g *Graph) AStar(from, to NodeID, cost CostFunc, timeBased bool) *SearchRes
 			}
 		}
 	}
-	return res
+	return res, nil
 }

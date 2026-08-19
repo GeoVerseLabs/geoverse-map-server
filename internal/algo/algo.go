@@ -14,6 +14,17 @@ import (
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source"
 )
 
+// CancelCheckInterval is how many iterations an algorithm's hot loop
+// should run between ctx.Err() checks. http.TimeoutHandler answers the
+// client when the deadline passes but does not stop the handler
+// goroutine, so an algorithm that never looks at ctx keeps burning CPU
+// for a request nobody is waiting for. Checking every iteration would put
+// an atomic load in the innermost loop; this stride keeps that cost
+// immeasurable while bounding post-cancellation work to well under a
+// millisecond. (internal/algo/network keeps its own copy of this value:
+// it sits below this package in the import graph and cannot reference it.)
+const CancelCheckInterval = 1024
+
 // Env gives algorithms access to the server's data.
 type Env struct {
 	// Features resolves a feature source (collection) by name.

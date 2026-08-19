@@ -93,13 +93,19 @@ func (Isochrone) Run(ctx context.Context, env *algo.Env, raw json.RawMessage) (i
 	cutoffs := append([]float64(nil), p.Cutoffs...)
 	sort.Float64s(cutoffs)
 	maxCut := cutoffs[len(cutoffs)-1]
-	res := g.Dijkstra(src, cost, maxCut, -1)
+	res, err := g.Dijkstra(ctx, src, cost, maxCut, -1)
+	if err != nil {
+		return nil, err
+	}
 
 	fc := geojson.NewFeatureCollection()
 	// Emit largest cutoff first so smaller rings draw on top.
 	for i := len(cutoffs) - 1; i >= 0; i-- {
 		cut := cutoffs[i]
-		mp, reached := contourForCutoff(g, res, cut, cost, p.CellSizeM)
+		mp, reached, err := contourForCutoff(ctx, g, res, cut, cost, p.CellSizeM)
+		if err != nil {
+			return nil, err
+		}
 		if len(mp) == 0 {
 			continue
 		}
@@ -124,9 +130,64 @@ func costName(c string) string {
 	return c
 }
 
+// maxContourCells caps the raster a single contour pass may allocate.
+// cell_size_m is caller-supplied and divides into the reachable extent,
+// so without a cap a request like {"cutoffs":[300],"cell_size_m":0.01}
+// over an 800m walk asks for a 79986 x 80020 grid — 6.4e9 cells, and
+// dilate() doubles it, i.e. ~12.8 GB from one request. 4M cells
+// (2000x2000, ~8 MB with dilation) is far finer than the /128 automatic
+// size and still bounded.
+const maxContourCells = 4 << 20
+
+// contourGrid picks the raster cell size for one contour pass and builds
+// the grid. cellSizeM <= 0 selects the automatic size (extent/128).
+// Splitting this out of contourForCutoff keeps the sizing arithmetic
+// testable without allocating the grid it describes.
+func contourGrid(minP, maxP orb.Point, cellSizeM float64) (*binaryGrid, error) {
+	lonM, latM := 111320*math.Cos((minP[1]+maxP[1])/2*math.Pi/180), 111132.0
+	if lonM < 1 {
+		lonM = 1
+	}
+	extentM := math.Max((maxP[0]-minP[0])*lonM, (maxP[1]-minP[1])*latM)
+	cell := cellSizeM
+	if cell <= 0 {
+		cell = math.Max(extentM/128, 5)
+	}
+	if math.IsNaN(cell) || math.IsInf(cell, 0) {
+		return nil, algo.Errorf("cell_size_m must be a finite number")
+	}
+	cw, ch := cell/lonM, cell/latM
+	// Pad 2 cells so dilation and contours never touch the border.
+	const pad = 2.0
+	nxF := (maxP[0]-minP[0])/cw + 2*pad + 1
+	nyF := (maxP[1]-minP[1])/ch + 2*pad + 1
+	// Compare in float64 before converting: the product of two int-sized
+	// dimensions can overflow, and int(NaN/Inf) is undefined.
+	if nxF*nyF > maxContourCells {
+		// Scaling the cell by sqrt(over-budget) divides the cell *count*
+		// by that budget only in the limit: each dimension also carries
+		// the additive 2*pad+1 term, so the plain sqrt lands marginally
+		// over the cap (measured: it suggested 0.391, which still needed
+		// 2051x2051). The margin — and the rounding headroom it also
+		// covers — is what makes the suggested value one the caller can
+		// actually use; TestContourGridSizing feeds it back in to prove
+		// the message does not send anyone in circles.
+		const suggestionMargin = 1.1
+		minCell := cell * math.Sqrt(nxF*nyF/maxContourCells) * suggestionMargin
+		return nil, algo.Errorf(
+			"cell_size_m %g needs a %.0fx%.0f raster (%.3g cells, limit %d); use cell_size_m >= %.3g or omit it for the automatic size",
+			cellSizeM, nxF, nyF, nxF*nyF, maxContourCells, minCell)
+	}
+	nx, ny := int(nxF), int(nyF)
+	if nx < 1 || ny < 1 {
+		return nil, algo.Errorf("cell_size_m %g produces an empty raster", cellSizeM)
+	}
+	return newBinaryGrid(nx, ny, minP[0]-pad*cw, minP[1]-pad*ch, cw, ch), nil
+}
+
 // contourForCutoff rasterizes the sub-cutoff portion of the search tree
 // and extracts contour polygons.
-func contourForCutoff(g *network.Graph, res *network.SearchResult, cutoff float64, cost network.CostFunc, cellSizeM float64) (orb.MultiPolygon, int) {
+func contourForCutoff(ctx context.Context, g *network.Graph, res *network.SearchResult, cutoff float64, cost network.CostFunc, cellSizeM float64) (orb.MultiPolygon, int, error) {
 	// Collect reached geometry: full segments where both ends are within
 	// budget, partial segments interpolated exactly at the cutoff.
 	type seg struct{ a, b orb.Point }
@@ -141,6 +202,11 @@ func contourForCutoff(g *network.Graph, res *network.SearchResult, cutoff float6
 	}
 	reached := 0
 	for u := range g.Nodes {
+		if u%algo.CancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, 0, err
+			}
+		}
 		cu := res.Cost[u]
 		if math.IsInf(cu, 1) || cu > cutoff {
 			continue
@@ -166,28 +232,17 @@ func contourForCutoff(g *network.Graph, res *network.SearchResult, cutoff float6
 		}
 	}
 	if reached == 0 || len(segs) == 0 {
-		return nil, reached
+		return nil, reached, nil
 	}
 
-	lonM, latM := 111320*math.Cos((minP[1]+maxP[1])/2*math.Pi/180), 111132.0
-	if lonM < 1 {
-		lonM = 1
+	grid, err := contourGrid(minP, maxP, cellSizeM)
+	if err != nil {
+		return nil, 0, err
 	}
-	extentM := math.Max((maxP[0]-minP[0])*lonM, (maxP[1]-minP[1])*latM)
-	cell := cellSizeM
-	if cell <= 0 {
-		cell = math.Max(extentM/128, 5)
-	}
-	cw, ch := cell/lonM, cell/latM
-	// Pad 2 cells so dilation and contours never touch the border.
-	pad := 2.0
-	nx := int((maxP[0]-minP[0])/cw) + int(2*pad) + 1
-	ny := int((maxP[1]-minP[1])/ch) + int(2*pad) + 1
-	grid := newBinaryGrid(nx, ny, minP[0]-pad*cw, minP[1]-pad*ch, cw, ch)
 	for _, s := range segs {
 		grid.markSegment(s.a, s.b)
 	}
 	grid.dilate()
 	rings := grid.contours()
-	return assemblePolygons(rings, cw/2), reached
+	return assemblePolygons(rings, grid.cw/2), reached, nil
 }

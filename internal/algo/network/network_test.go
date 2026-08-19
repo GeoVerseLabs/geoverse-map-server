@@ -1,6 +1,8 @@
 package network
 
 import (
+	"context"
+	"errors"
 	"math"
 	"testing"
 
@@ -31,7 +33,7 @@ func grid3(t *testing.T) *Graph {
 		feats = append(feats, line(geojson.Properties{"name": "v"},
 			[2]float64{x, 0}, [2]float64{x, 0.001}, [2]float64{x, 0.002}))
 	}
-	g, err := Build(feats, BuildOptions{DefaultSpeedKMH: 5})
+	g, err := Build(t.Context(), feats, BuildOptions{DefaultSpeedKMH: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +58,10 @@ func TestAStarMatchesManhattan(t *testing.T) {
 	if !ok || !ok2 {
 		t.Fatal("snap failed")
 	}
-	res := g.AStar(src, dst, DistanceCost, false)
+	res, err := g.AStar(t.Context(), src, dst, DistanceCost, false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	path := res.PathTo(g, dst)
 	if len(path) != 4 {
 		t.Fatalf("path edges = %d, want 4", len(path))
@@ -67,9 +72,39 @@ func TestAStarMatchesManhattan(t *testing.T) {
 		t.Errorf("cost = %.1f, want %.1f", res.Cost[dst], want)
 	}
 	// A* and Dijkstra must agree.
-	dres := g.Dijkstra(src, DistanceCost, 0, dst)
+	dres, err := g.Dijkstra(t.Context(), src, DistanceCost, 0, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if math.Abs(res.Cost[dst]-dres.Cost[dst]) > 1e-9 {
 		t.Errorf("A* %.3f != Dijkstra %.3f", res.Cost[dst], dres.Cost[dst])
+	}
+}
+
+// TestSearchHonoursCancellation pins the behaviour the ctx plumbing
+// exists for: a cancelled context stops a search instead of running it to
+// completion for a caller that has already gone away.
+func TestSearchHonoursCancellation(t *testing.T) {
+	g := grid3(t)
+	src, _, _ := g.NearestNode(orb.Point{0, 0}, 0, 50)
+	dst, _, _ := g.NearestNode(orb.Point{0.002, 0.002}, 0, 50)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := g.AStar(ctx, src, dst, DistanceCost, false); !errors.Is(err, context.Canceled) {
+		t.Errorf("AStar with cancelled ctx: err = %v, want context.Canceled", err)
+	}
+	if _, err := g.Dijkstra(ctx, src, DistanceCost, 0, dst); !errors.Is(err, context.Canceled) {
+		t.Errorf("Dijkstra with cancelled ctx: err = %v, want context.Canceled", err)
+	}
+	if _, err := g.DijkstraSeeded(ctx, []Seed{{Node: src}}, DistanceCost, 0, dst); !errors.Is(err, context.Canceled) {
+		t.Errorf("DijkstraSeeded with cancelled ctx: err = %v, want context.Canceled", err)
+	}
+	if _, err := Build(ctx, []*geojson.Feature{
+		line(nil, [2]float64{0, 0}, [2]float64{0.001, 0}),
+	}, BuildOptions{DefaultSpeedKMH: 5}); !errors.Is(err, context.Canceled) {
+		t.Errorf("Build with cancelled ctx: err = %v, want context.Canceled", err)
 	}
 }
 
@@ -77,7 +112,7 @@ func TestOneway(t *testing.T) {
 	feats := []*geojson.Feature{
 		line(geojson.Properties{"oneway": "yes"}, [2]float64{0, 0}, [2]float64{0.001, 0}),
 	}
-	g, err := Build(feats, BuildOptions{DefaultSpeedKMH: 50, OnewayField: "oneway"})
+	g, err := Build(t.Context(), feats, BuildOptions{DefaultSpeedKMH: 50, OnewayField: "oneway"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,10 +121,14 @@ func TestOneway(t *testing.T) {
 	}
 	a, _, _ := g.NearestNode(orb.Point{0, 0}, 0, 10)
 	b, _, _ := g.NearestNode(orb.Point{0.001, 0}, 0, 10)
-	if res := g.Dijkstra(a, DistanceCost, 0, b); math.IsInf(res.Cost[b], 1) {
+	if res, err := g.Dijkstra(t.Context(), a, DistanceCost, 0, b); err != nil {
+		t.Fatal(err)
+	} else if math.IsInf(res.Cost[b], 1) {
 		t.Error("forward direction should be routable")
 	}
-	if res := g.Dijkstra(b, DistanceCost, 0, a); !math.IsInf(res.Cost[a], 1) {
+	if res, err := g.Dijkstra(t.Context(), b, DistanceCost, 0, a); err != nil {
+		t.Fatal(err)
+	} else if !math.IsInf(res.Cost[a], 1) {
 		t.Error("reverse direction must be blocked")
 	}
 }
@@ -102,7 +141,7 @@ func TestLevelsAndConnector(t *testing.T) {
 		line(geojson.Properties{"level_from": 1.0, "level_to": 2.0, "duration_s": 30.0},
 			[2]float64{0, 0}, [2]float64{0, 0}),
 	}
-	g, err := Build(feats, BuildOptions{DefaultSpeedKMH: 5})
+	g, err := Build(t.Context(), feats, BuildOptions{DefaultSpeedKMH: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +151,10 @@ func TestLevelsAndConnector(t *testing.T) {
 	if !ok1 || !ok2 || n1 == n2 {
 		t.Fatalf("level nodes: %v/%v ok=%v/%v", n1, n2, ok1, ok2)
 	}
-	res := g.Dijkstra(n1, TimeCost, 0, n2)
+	res, err := g.Dijkstra(t.Context(), n1, TimeCost, 0, n2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if math.IsInf(res.Cost[n2], 1) {
 		t.Fatal("levels must connect through the elevator")
 	}

@@ -108,7 +108,10 @@ func (DBSCAN) Run(ctx context.Context, env *algo.Env, raw json.RawMessage) (inte
 		return nil, algo.Errorf("collection %q has no usable features", p.Collection)
 	}
 
-	labels := run(pts, p.EpsM, p.MinPoints)
+	labels, err := run(ctx, pts, p.EpsM, p.MinPoints)
+	if err != nil {
+		return nil, err
+	}
 
 	// Cluster summaries.
 	type agg struct {
@@ -169,8 +172,9 @@ func (DBSCAN) Run(ctx context.Context, env *algo.Env, raw json.RawMessage) (inte
 }
 
 // run executes grid-accelerated DBSCAN and returns a cluster label per
-// point (>= 0) or noise (-1).
-func run(pts []orb.Point, epsM float64, minPts int) []int {
+// point (>= 0) or noise (-1). It returns ctx.Err() if the caller's
+// context is cancelled part-way through the expansion.
+func run(ctx context.Context, pts []orb.Point, epsM float64, minPts int) ([]int, error) {
 	// Local equirectangular projection around the centroid keeps eps
 	// metric without full geodesic math per pair.
 	var cx, cy float64
@@ -227,6 +231,11 @@ func run(pts []orb.Point, epsM float64, minPts int) []int {
 	}
 	cluster := 0
 	for i := range pts {
+		if i%algo.CancelCheckInterval == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if labels[i] != unclassified {
 			continue
 		}
@@ -236,9 +245,17 @@ func run(pts []orb.Point, epsM float64, minPts int) []int {
 			continue
 		}
 		labels[i] = cluster
-		// Expand the cluster breadth-first over core points.
+		// Expand the cluster breadth-first over core points. The check
+		// belongs here too, not just in the outer loop: one dense cluster
+		// can absorb every remaining point inside a single outer
+		// iteration, so the outer check would fire only once.
 		queue := append([]int32(nil), nb...)
-		for len(queue) > 0 {
+		for steps := 0; len(queue) > 0; steps++ {
+			if steps%algo.CancelCheckInterval == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
 			j := queue[0]
 			queue = queue[1:]
 			if labels[j] == noise {
@@ -255,5 +272,5 @@ func run(pts []orb.Point, epsM float64, minPts int) []int {
 		}
 		cluster++
 	}
-	return labels
+	return labels, nil
 }

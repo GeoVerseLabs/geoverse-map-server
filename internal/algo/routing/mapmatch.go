@@ -143,7 +143,10 @@ func (MapMatch) Run(ctx context.Context, env *algo.Env, raw json.RawMessage) (in
 		// One seeded Dijkstra per predecessor candidate reaches every
 		// current candidate in a single search.
 		for j := range prevRow {
-			res := g.DijkstraSeeded(exitSeeds(g, &prevRow[j].EdgeCandidate), network.DistanceCost, cutoff, -1)
+			res, err := g.DijkstraSeeded(ctx, exitSeeds(g, &prevRow[j].EdgeCandidate), network.DistanceCost, cutoff, -1)
+			if err != nil {
+				return nil, err
+			}
 			for k := range curRow {
 				routeD, ok := entryDistance(g, res, &curRow[k].EdgeCandidate, &prevRow[j].EdgeCandidate)
 				if !ok {
@@ -193,7 +196,10 @@ func (MapMatch) Run(ctx context.Context, env *algo.Env, raw json.RawMessage) (in
 			matchedLine = append(matchedLine, c.Point)
 			continue
 		}
-		segLine, segLen := routeGeometry(g, &states[i-1][chosen[i-1]].EdgeCandidate, c)
+		segLine, segLen, err := routeGeometry(ctx, g, &states[i-1][chosen[i-1]].EdgeCandidate, c)
+		if err != nil {
+			return nil, err
+		}
 		totalLen += segLen
 		matchedLine = append(matchedLine, segLine...)
 	}
@@ -251,11 +257,14 @@ func entryDistance(g *network.Graph, res *network.SearchResult, c, prev *network
 
 // routeGeometry stitches the on-network geometry between two consecutive
 // matched candidates (projection point → nodes → projection point).
-func routeGeometry(g *network.Graph, a, b *network.EdgeCandidate) (orb.LineString, float64) {
+func routeGeometry(ctx context.Context, g *network.Graph, a, b *network.EdgeCandidate) (orb.LineString, float64, error) {
 	if a.EdgeIdx == b.EdgeIdx {
-		return orb.LineString{b.Point}, network.Haversine(a.Point, b.Point)
+		return orb.LineString{b.Point}, network.Haversine(a.Point, b.Point), nil
 	}
-	res := g.DijkstraSeeded(exitSeeds(g, a), network.DistanceCost, 0, -1)
+	res, err := g.DijkstraSeeded(ctx, exitSeeds(g, a), network.DistanceCost, 0, -1)
+	if err != nil {
+		return nil, 0, err
+	}
 	eb := &g.Edges[b.EdgeIdx]
 	entryNode := eb.From
 	entryOffset := b.Frac * eb.LengthM
@@ -265,7 +274,7 @@ func routeGeometry(g *network.Graph, a, b *network.EdgeCandidate) (orb.LineStrin
 	}
 	if math.IsInf(res.Cost[entryNode], 1) {
 		// Disconnected: draw a straight gap segment.
-		return orb.LineString{b.Point}, network.Haversine(a.Point, b.Point)
+		return orb.LineString{b.Point}, network.Haversine(a.Point, b.Point), nil
 	}
 	var line orb.LineString
 	path := res.PathTo(g, entryNode)
@@ -278,5 +287,5 @@ func routeGeometry(g *network.Graph, a, b *network.EdgeCandidate) (orb.LineStrin
 		line = append(line, g.Nodes[entryNode].Pt)
 	}
 	line = append(line, b.Point)
-	return line, res.Cost[entryNode] + entryOffset
+	return line, res.Cost[entryNode] + entryOffset, nil
 }

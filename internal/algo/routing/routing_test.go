@@ -3,6 +3,10 @@ package routing
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"strings"
 	"testing"
 
 	"github.com/paulmach/orb"
@@ -153,6 +157,76 @@ func TestIsochroneNested(t *testing.T) {
 	// Largest cutoff first.
 	if fc.Features[0].Properties["cutoff"].(float64) != 300 {
 		t.Errorf("first cutoff = %v, want 300", fc.Features[0].Properties["cutoff"])
+	}
+}
+
+// TestIsochroneRejectsUnboundedRaster covers the resource-exhaustion path
+// cell_size_m used to open: it is caller-supplied and divides into the
+// reachable extent, so a small value asked for a grid of billions of
+// cells (measured: cell_size_m=0.01 over an 800m walk => 79986 x 80020,
+// ~12.8 GB once dilate() doubles it) and took the process down with it.
+// The request must now be refused as a client error, not attempted.
+func TestIsochroneRejectsUnboundedRaster(t *testing.T) {
+	env := testEnv(t)
+	for _, params := range []string{
+		`{"network":"walk","origin":[0.001,0.001],"cutoffs":[300],"cell_size_m":0.01}`,
+		`{"network":"walk","origin":[0.001,0.001],"cutoffs":[300],"cell_size_m":0.0001}`,
+	} {
+		_, err := (Isochrone{}).Run(context.Background(), env, json.RawMessage(params))
+		if err == nil {
+			t.Fatalf("params %s: expected a refusal, got success", params)
+		}
+		var ue *algo.UserError
+		if !errors.As(err, &ue) {
+			t.Errorf("params %s: err = %#v, want algo.UserError (400, not 500)", params, err)
+		}
+	}
+
+	// A sane explicit cell size still works, so the guard is a cap and not
+	// a removal of the parameter.
+	out := runAlgo(t, Isochrone{}, env,
+		`{"network":"walk","origin":[0.001,0.001],"cutoffs":[300],"cell_size_m":5}`)
+	if len(out.(*geojson.FeatureCollection).Features) == 0 {
+		t.Error("cell_size_m=5 should still produce contours")
+	}
+}
+
+// TestContourGridSizing pins the arithmetic directly: dimensions scale as
+// 1/cell, the cap rejects before allocating, and the error names a cell
+// size that would actually be accepted.
+func TestContourGridSizing(t *testing.T) {
+	minP := orb.Point{121.5, 31.20}
+	maxP := orb.Point{121.5084, 31.2072} // ~800m box
+
+	auto, err := contourGrid(minP, maxP, 0)
+	if err != nil {
+		t.Fatalf("automatic sizing must succeed: %v", err)
+	}
+	if auto.nx*auto.ny > maxContourCells {
+		t.Errorf("automatic grid %dx%d exceeds the cap", auto.nx, auto.ny)
+	}
+
+	if _, err := contourGrid(minP, maxP, 0.01); err == nil {
+		t.Fatal("cell_size_m=0.01 must be refused")
+	}
+	for _, bad := range []float64{math.NaN(), math.Inf(1)} {
+		if _, err := contourGrid(minP, maxP, bad); err == nil {
+			t.Errorf("cell_size_m=%v must be refused", bad)
+		}
+	}
+
+	// The remedy the error suggests has to actually pass the guard,
+	// otherwise the message sends the caller in circles.
+	_, err = contourGrid(minP, maxP, 0.01)
+	if err == nil {
+		t.Fatal("expected refusal")
+	}
+	var suggested float64
+	if _, scanErr := fmt.Sscanf(err.Error()[strings.LastIndex(err.Error(), ">= ")+3:], "%g", &suggested); scanErr != nil {
+		t.Fatalf("could not read the suggested cell size out of %q: %v", err.Error(), scanErr)
+	}
+	if _, err := contourGrid(minP, maxP, suggested); err != nil {
+		t.Errorf("suggested cell_size_m %g was itself refused: %v", suggested, err)
 	}
 }
 

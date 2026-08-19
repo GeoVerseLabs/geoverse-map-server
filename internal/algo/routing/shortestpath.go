@@ -109,7 +109,10 @@ func (ShortestPath) Run(ctx context.Context, env *algo.Env, raw json.RawMessage)
 		return nil, algo.Errorf("no network node within %.0fm of destination on level %d", snap, p.ToLevel)
 	}
 
-	res := g.AStar(src, dst, cost, timeBased)
+	res, err := g.AStar(ctx, src, dst, cost, timeBased)
+	if err != nil {
+		return nil, err
+	}
 	path := res.PathTo(g, dst)
 	if path == nil && src != dst {
 		return nil, algo.Errorf("origin and destination are not connected in network %q", p.Network)
