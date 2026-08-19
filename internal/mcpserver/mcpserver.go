@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/source"
@@ -36,12 +37,18 @@ type Handler struct {
 	// MCP tool prefixed "algo_".
 	algos *algo.Registry
 	env   *algo.Env
+	// onAlgorithmRun, when non-nil, receives one audit record per
+	// algorithm invocation so MCP-initiated runs land in the same log
+	// stream as HTTP ones. An audit trail that covered only one of the
+	// two entry points would read as "no MCP runs happened".
+	onAlgorithmRun func(name string, paramBytes int, elapsed time.Duration, outcome, detail string)
 }
 
 // New creates an MCP handler. algos/env may be nil to serve data tools
-// only.
-func New(reg *registry.Registry, version string, baseURL func(*http.Request) string, algos *algo.Registry, env *algo.Env) *Handler {
-	return &Handler{reg: reg, version: version, baseURL: baseURL, algos: algos, env: env}
+// only; onAlgorithmRun may be nil to skip audit records.
+func New(reg *registry.Registry, version string, baseURL func(*http.Request) string, algos *algo.Registry, env *algo.Env,
+	onAlgorithmRun func(name string, paramBytes int, elapsed time.Duration, outcome, detail string)) *Handler {
+	return &Handler{reg: reg, version: version, baseURL: baseURL, algos: algos, env: env, onAlgorithmRun: onAlgorithmRun}
 }
 
 type rpcRequest struct {
@@ -244,7 +251,9 @@ func (h *Handler) callTool(r *http.Request, params json.RawMessage) (interface{}
 			if len(args) == 0 {
 				args = json.RawMessage("{}")
 			}
+			started := time.Now()
 			out, err = a.Run(ctx, h.env, args)
+			h.auditAlgorithmRun(a.Describe().Name, len(args), time.Since(started), err)
 			break
 		}
 		return nil, &rpcError{Code: -32602, Message: fmt.Sprintf("unknown tool %q", p.Name)}
@@ -253,6 +262,29 @@ func (h *Handler) callTool(r *http.Request, params json.RawMessage) (interface{}
 		return toolResult(map[string]interface{}{"error": err.Error()}, true), nil
 	}
 	return toolResult(out, false), nil
+}
+
+// auditAlgorithmRun classifies one MCP algorithm run for the audit log.
+// Cancellation is reported separately from failure: it says the caller
+// gave up, not that the algorithm is broken.
+func (h *Handler) auditAlgorithmRun(name string, paramBytes int, elapsed time.Duration, err error) {
+	if h.onAlgorithmRun == nil {
+		return
+	}
+	outcome, detail := "ok", ""
+	switch {
+	case err == nil:
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		outcome, detail = "cancelled", err.Error()
+	default:
+		var ue *algo.UserError
+		if errors.As(err, &ue) {
+			outcome, detail = "rejected", ue.Msg
+		} else {
+			outcome, detail = "failed", err.Error()
+		}
+	}
+	h.onAlgorithmRun(name, paramBytes, elapsed, outcome, detail)
 }
 
 // algoFor resolves an "algo_"-prefixed tool name to its algorithm.

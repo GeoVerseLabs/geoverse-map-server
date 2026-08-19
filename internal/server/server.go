@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/cluster"
@@ -138,7 +139,10 @@ func (s *Server) Handler() http.Handler {
 		if s.cfg.Algorithms.On() {
 			algos = s.algos
 		}
-		mcp := mcpserver.New(s.reg, Version, s.baseURL, algos, s.env)
+		mcp := mcpserver.New(s.reg, Version, s.baseURL, algos, s.env,
+			func(name string, paramBytes int, elapsed time.Duration, outcome, detail string) {
+				s.logAlgorithmRun(name, "mcp", paramBytes, elapsed, outcome, detail)
+			})
 		mux.Handle(s.cfg.MCP.Path, mcp)
 	}
 

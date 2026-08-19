@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo"
 	"github.com/GeoVerseLabs/geoverse-map-server/internal/algo/network"
@@ -40,7 +41,7 @@ func testHandler(t *testing.T) *Handler {
 		t.Fatal(err)
 	}
 	t.Cleanup(reg.Close)
-	return New(reg, "test", func(*http.Request) string { return "http://example.test" }, nil, nil)
+	return New(reg, "test", func(*http.Request) string { return "http://example.test" }, nil, nil, nil)
 }
 
 // rpc posts one JSON-RPC request and decodes the response envelope.
@@ -185,7 +186,7 @@ func TestServerStatusTool(t *testing.T) {
 	}
 }
 
-func algoHandler(t *testing.T) *Handler {
+func algoHandler(t *testing.T, audit *[]auditRecord) *Handler {
 	t.Helper()
 	pathsGeoJSON := `{"type":"FeatureCollection","features":[
 		{"type":"Feature","properties":{"name":"ew"},
@@ -209,11 +210,22 @@ func algoHandler(t *testing.T) *Handler {
 			{Name: "walk", Source: "paths", DefaultSpeedKMH: 5},
 		}, reg.FeatureSource),
 	}
-	return New(reg, "test", func(*http.Request) string { return "http://example.test" }, algos, env)
+	return New(reg, "test", func(*http.Request) string { return "http://example.test" }, algos, env,
+		func(name string, paramBytes int, elapsed time.Duration, outcome, detail string) {
+			*audit = append(*audit, auditRecord{Name: name, ParamBytes: paramBytes, Outcome: outcome, Detail: detail})
+		})
+}
+
+type auditRecord struct {
+	Name       string
+	ParamBytes int
+	Outcome    string
+	Detail     string
 }
 
 func TestAlgorithmToolsExposed(t *testing.T) {
-	h := algoHandler(t)
+	var audit []auditRecord
+	h := algoHandler(t, &audit)
 	resp := rpc(t, h, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	tools := resp["result"].(map[string]interface{})["tools"].([]interface{})
 	found := false
@@ -239,6 +251,22 @@ func TestAlgorithmToolsExposed(t *testing.T) {
 	if _, isErr := callTool(t, h, "algo_shortest_path",
 		`{"network":"nope","from":[0,0],"to":[0.002,0]}`); !isErr {
 		t.Error("expected tool error for unknown network")
+	}
+
+	// MCP-initiated runs must reach the same audit trail as HTTP ones,
+	// and a bad-parameter run must be classified as a rejection rather
+	// than a server-side failure.
+	if len(audit) != 2 {
+		t.Fatalf("audit records = %d, want 2: %+v", len(audit), audit)
+	}
+	if audit[0].Name != "shortest_path" || audit[0].Outcome != "ok" {
+		t.Errorf("successful run audited as %+v", audit[0])
+	}
+	if audit[0].ParamBytes == 0 {
+		t.Error("audit record should carry the parameter size")
+	}
+	if audit[1].Outcome != "rejected" {
+		t.Errorf("bad-parameter run audited as %q, want \"rejected\"", audit[1].Outcome)
 	}
 }
 

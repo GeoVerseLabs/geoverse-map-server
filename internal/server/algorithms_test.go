@@ -1,7 +1,9 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -114,4 +116,30 @@ func TestRunDBSCANHTTP(t *testing.T) {
 	if out["cluster_count"] == nil {
 		t.Errorf("result: %v", out)
 	}
+}
+
+// TestAlgorithmCancellationIsNotAServerError checks the classification an
+// abandoned run gets. Algorithms now return ctx.Err() when the caller
+// goes away; reporting that as 500 would put the client's own disconnect
+// into the server's error budget and page whoever watches 5xx.
+func TestAlgorithmCancellationIsNotAServerError(t *testing.T) {
+	ts := algoServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		ts.URL+"/algorithms/shortest_path",
+		strings.NewReader(`{"network":"walk","from":[0,0],"to":[0.002,0.002]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	cancel() // the client gives up before the request is even sent
+
+	if _, err := http.DefaultClient.Do(req); !errors.Is(err, context.Canceled) {
+		t.Fatalf("client error = %v, want context.Canceled", err)
+	}
+
+	// The server must still be healthy afterwards: a cancelled algorithm
+	// run is an ordinary outcome, not something that wedges the handler.
+	postJSON(t, ts.URL+"/algorithms/shortest_path",
+		`{"network":"walk","from":[0,0],"to":[0.002,0.002]}`, http.StatusOK)
 }
